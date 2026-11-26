@@ -11,5 +11,6 @@ urlpatterns = [
     path("afiliados/", views.affiliates, name="affiliates"),
     path("whatsapp/", views.whatsapp, name="whatsapp"),
     path("historico/", views.history, name="history"),
+    path("relatorios/", views.reports, name="reports"),
     path("configuracoes/", views.settings_page, name="settings"),
 ]

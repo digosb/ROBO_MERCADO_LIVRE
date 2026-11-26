@@ -2,10 +2,54 @@
 {% block title %}Histórico{% endblock %}
 {% block breadcrumb %}Histórico{% endblock %}
 {% block content %}
-<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>ATIVIDADE</div><h1>Histórico</h1><p>Ações e eventos registrados pelo painel.</p></div></div>
-<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-spark"/></svg></span><div><strong>Registro do ambiente local</strong><p>Eventos de simulação são identificados como tal. Envios e buscas externas não são realizados.</p></div></div>
-<section class="panel history-panel"><div class="panel-heading"><div><div class="eyebrow">EVENTOS RECENTES</div><h2>Registro de atividade</h2></div><span class="count-pill">Últimos 100</span></div>
+<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>ATIVIDADE</div><h1>Histórico</h1><p>Envios e eventos registrados a partir dos dados persistidos.</p></div></div>
+<section class="panel history-panel">
+  <div class="panel-heading"><div><div class="eyebrow">DIVULGAÇÕES</div><h2>Histórico de envios</h2></div><span class="count-pill">{{ sendings_page.paginator.count }} registro{{ sendings_page.paginator.count|pluralize:"s" }}</span></div>
+  <form method="get" class="history-filter-form">
+    <div class="filter-field">{{ history_filter.date_from.label_tag }}{{ history_filter.date_from }}{{ history_filter.date_from.errors }}</div>
+    <div class="filter-field">{{ history_filter.date_to.label_tag }}{{ history_filter.date_to }}{{ history_filter.date_to.errors }}</div>
+    <div class="filter-field filter-product">{{ history_filter.product.label_tag }}{{ history_filter.product }}{{ history_filter.product.errors }}</div>
+    <div class="filter-field">{{ history_filter.status.label_tag }}{{ history_filter.status }}{{ history_filter.status.errors }}</div>
+    <div class="filter-field">{{ history_filter.offer_type.label_tag }}{{ history_filter.offer_type }}{{ history_filter.offer_type.errors }}</div>
+    <button class="button button-primary" type="submit">Filtrar</button>
+    <a class="button button-secondary" href="{% url 'dashboard:history' %}">Limpar</a>
+  </form>
+  {% if history_filter.errors %}<div class="notice notice-error" role="alert">Revise os filtros inválidos. Nenhum registro foi filtrado.</div>{% endif %}
+  {% if sendings_page.object_list %}
+    <div class="table-wrap">
+      <table class="history-table">
+        <thead><tr><th>PRODUTO</th><th>PREÇO DIVULGADO</th><th>DESCONTO</th><th>LINK AFILIADO</th><th>DESTINO</th><th>TIPO</th><th>HORÁRIO</th><th>STATUS</th></tr></thead>
+        <tbody>
+          {% for envio in sendings_page.object_list %}
+          <tr>
+            <td>{{ envio.product_name_snapshot|default:envio.product.name }}</td>
+            <td>R$ {{ envio.price_snapshot|default_if_none:envio.offer.promotional_price|floatformat:2 }}</td>
+            <td>{{ envio.discount_snapshot|default_if_none:envio.offer.discount_percent }}%</td>
+            <td>{% if envio.affiliate_url %}<a class="table-link" href="{{ envio.affiliate_url }}" target="_blank" rel="noopener noreferrer">Abrir link <svg class="icon"><use href="#i-arrow"/></svg></a>{% else %}<span class="muted-price">Não registrado</span>{% endif %}</td>
+            <td>{{ envio.destination }}</td>
+            <td>{{ envio.offer.get_promotion_type_display }}</td>
+            <td><time datetime="{{ envio.created_at|date:'c' }}">{{ envio.created_at|date:"d/m/Y H:i:s" }}</time></td>
+            <td><span class="offer-status offer-status-{{ envio.status }}">{{ envio.get_status_display }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if sendings_page.has_other_pages %}
+    <nav class="pagination" aria-label="Paginação do histórico">
+      {% if sendings_page.has_previous %}<a href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ sendings_page.previous_page_number }}">Anterior</a>{% endif %}
+      <span>Página {{ sendings_page.number }} de {{ sendings_page.paginator.num_pages }}</span>
+      {% if sendings_page.has_next %}<a href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ sendings_page.next_page_number }}">Próxima</a>{% endif %}
+    </nav>
+    {% endif %}
+  {% else %}
+    <div class="empty-state compact-empty"><span class="empty-icon"><svg class="icon"><use href="#i-clock"/></svg></span><strong>Nenhum envio corresponde aos filtros</strong><p>Mensagens preparadas só aparecem aqui quando geram um registro de envio. Preparação não significa mensagem enviada.</p></div>
+  {% endif %}
+</section>
+
+<section class="panel history-panel">
+  <div class="panel-heading"><div><div class="eyebrow">AUDITORIA</div><h2>Eventos recentes</h2></div><span class="count-pill">Últimos {{ events|length }}</span></div>
   {% if events %}<div class="activity-list">{% for event in events %}<article class="activity-item"><span class="activity-marker {% if event.severity == 'error' or event.severity == 'critical' %}activity-marker-error{% endif %}"><svg class="icon"><use href="{% if event.severity == 'error' or event.severity == 'critical' %}#i-alert{% else %}#i-check{% endif %}"/></svg></span><div class="activity-copy"><strong>{{ event.description }}</strong><span>{{ event.get_event_type_display }} · {{ event.get_severity_display }}</span></div><time datetime="{{ event.occurred_at|date:'c' }}">{{ event.occurred_at|date:"d/m/Y H:i:s" }}</time></article>{% endfor %}</div>
-  {% else %}<div class="empty-state"><span class="empty-icon"><svg class="icon"><use href="#i-clock"/></svg></span><strong>Nenhuma atividade registrada</strong><p>Quando você interagir com os controles, as ações aparecerão aqui.</p></div>{% endif %}
+  {% else %}<div class="empty-state compact-empty"><strong>Nenhum evento registrado</strong><p>Falhas e ações do sistema aparecerão aqui quando ocorrerem.</p></div>{% endif %}
 </section>
 {% endblock %}

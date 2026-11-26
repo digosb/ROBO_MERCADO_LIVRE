@@ -2,9 +2,70 @@
 {% block title %}Configurações{% endblock %}
 {% block breadcrumb %}Configurações{% endblock %}
 {% block content %}
-<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>PREFERÊNCIAS</div><h1>Configurações</h1><p>Ajuste os parâmetros do painel.</p></div></div>
-<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-alert"/></svg></span><div><strong>Intervalo do motor</strong><p>O worker APScheduler aplica o intervalo salvo. O envio automático continua bloqueado até haver um provedor autorizado e compatível com o destino.</p></div></div>
-<section class="panel settings-panel"><div class="panel-heading"><div><div class="eyebrow">DISTRIBUIÇÃO</div><h2>Intervalo e limite diário</h2></div><span class="panel-heading-icon"><svg class="icon"><use href="#i-clock"/></svg></span></div>
-  <form method="post" class="settings-form">{% csrf_token %}<label for="send-interval">Tempo entre ciclos</label><div class="interval-control"><input id="send-interval" name="send_interval_minutes" type="number" min="1" max="1440" step="1" value="{{ settings.send_interval_minutes }}" required><span>minutos</span></div><span class="field-help">Escolha um valor entre 1 e 1440 minutos. O padrão inicial é 10 minutos.</span><label class="setting-secondary-label" for="max-sends">Quantidade máxima de envios por dia</label><div class="interval-control"><input id="max-sends" name="max_sends_per_day" type="number" min="1" max="10000" step="1" value="{{ settings.max_sends_per_day }}" required><span>envios/dia</span></div><span class="field-help">Limite diário entre 1 e 10000. Envios pendentes e preparados também reservam uma vaga.</span><div class="settings-divider"></div><div class="settings-info"><span class="info-icon"><svg class="icon"><use href="#i-alert"/></svg></span><p>Inicie o processo independente com <code>python manage.py run_automation</code>. Sem provedor oficial de busca, mensagens não serão simuladas; sem envio compatível, ficarão somente preparadas.</p></div><button class="button button-primary" type="submit">Salvar configurações</button></form>
+<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>PREFERÊNCIAS</div><h1>Configurações</h1><p>Parâmetros validados do motor e dos provedores disponíveis.</p></div></div>
+<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-alert"/></svg></span><div><strong>Limites atuais das integrações</strong><p>A busca geral oficial e o envio para o grupo existente não estão disponíveis. O formulário só oferece opções compatíveis com o que o sistema realmente consegue executar.</p></div></div>
+<section class="panel settings-panel">
+  <div class="panel-heading"><div><div class="eyebrow">EXECUÇÃO</div><h2>Intervalo, limite e horário</h2></div><span class="panel-heading-icon"><svg class="icon"><use href="#i-clock"/></svg></span></div>
+  <form method="post" class="settings-form">
+    {% csrf_token %}
+    {{ settings_form.non_field_errors }}
+    <div class="settings-field">
+      {{ settings_form.send_interval_minutes.label_tag }}
+      {{ settings_form.send_interval_minutes }}
+      {{ settings_form.send_interval_minutes.errors }}
+      <span class="field-help">Intervalo entre ciclos, de 1 a 1440 minutos. O padrão é 10 minutos.</span>
+    </div>
+    <div class="settings-field">
+      {{ settings_form.max_sends_per_day.label_tag }}
+      {{ settings_form.max_sends_per_day }}
+      {{ settings_form.max_sends_per_day.errors }}
+      <span class="field-help">De 1 a 10000. Envios aguardando, preparados e enviados reservam capacidade diária.</span>
+    </div>
+    <div class="settings-field">
+      <label class="checkbox-field">{{ settings_form.operating_hours_enabled }} Restringir ciclos ao horário de funcionamento</label>
+      {{ settings_form.operating_hours_enabled.errors }}
+      <span class="field-help">Desmarcado, o motor funciona 24 horas. Se o início for posterior ao fim, a faixa atravessa a meia-noite.</span>
+    </div>
+    <div class="settings-time-grid">
+      <div class="settings-field">{{ settings_form.operating_start_time.label_tag }}{{ settings_form.operating_start_time }}{{ settings_form.operating_start_time.errors }}</div>
+      <div class="settings-field">{{ settings_form.operating_end_time.label_tag }}{{ settings_form.operating_end_time }}{{ settings_form.operating_end_time.errors }}</div>
+    </div>
+    <div class="settings-divider"></div>
+    <div class="panel-heading settings-subheading"><div><div class="eyebrow">DIVULGAÇÃO</div><h2>Destino e notificações</h2></div></div>
+    <div class="settings-field">
+      {{ settings_form.whatsapp_destination.label_tag }}
+      {{ settings_form.whatsapp_destination }}
+      {{ settings_form.whatsapp_destination.errors }}
+      <span class="field-help">Rótulo local do destino. Não valida nem conecta um grupo do WhatsApp.</span>
+    </div>
+    <div class="settings-field">
+      <label class="checkbox-field">{{ settings_form.notifications_enabled }} Ativar notificações internas no painel</label>
+      {{ settings_form.notifications_enabled.errors }}
+      <span class="field-help">Exibe avisos e falhas recentes registrados no banco. Não envia e-mail, push ou WhatsApp.</span>
+    </div>
+    <div class="settings-divider"></div>
+    <div class="panel-heading settings-subheading"><div><div class="eyebrow">INTEGRAÇÕES</div><h2>Provedores</h2></div></div>
+    <div class="settings-field">
+      {{ settings_form.offer_provider.label_tag }}
+      {{ settings_form.offer_provider }}
+      {{ settings_form.offer_provider.errors }}
+      <span class="field-help">A busca geral do Mercado Livre permanece indisponível; selecionar o adaptador não inventa ofertas.</span>
+    </div>
+    <div class="settings-field">
+      {{ settings_form.affiliate_provider.label_tag }}
+      {{ settings_form.affiliate_provider }}
+      {{ settings_form.affiliate_provider.errors }}
+      <span class="field-help">A geração automática não está habilitada; links autorizados podem ser importados manualmente.</span>
+    </div>
+    <div class="settings-field">
+      {{ settings_form.whatsapp_provider.label_tag }}
+      {{ settings_form.whatsapp_provider }}
+      {{ settings_form.whatsapp_provider.errors }}
+      <span class="field-help">A preparação local não envia mensagens. A API oficial só pode ser selecionada se estiver autorizada, conectada e compatível com o destino.</span>
+    </div>
+    <div class="settings-divider"></div>
+    <div class="settings-info"><span class="info-icon"><svg class="icon"><use href="#i-alert"/></svg></span><p>Para executar o agendador independente, inicie <code>python manage.py run_automation</code> em um terminal separado.</p></div>
+    <button class="button button-primary" type="submit">Salvar configurações</button>
+  </form>
 </section>
 {% endblock %}

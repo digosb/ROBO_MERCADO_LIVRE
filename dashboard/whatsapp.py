@@ -191,3 +191,13 @@ def get_delivery_provider() -> DeliveryProvider:
     return UnsupportedOfficialDeliveryProvider()
 
 
+def is_official_delivery_ready(destination: str, provider=None) -> bool:
+    provider = provider or get_delivery_provider()
+    return bool(
+        destination
+        and provider.is_authorized
+        and provider.is_connected
+        and provider.supports_destination(destination)
+    )
+
+

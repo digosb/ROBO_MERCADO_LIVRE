@@ -41,6 +41,11 @@ válido. Na ausência de um provedor autorizado, conectado e compatível com o
 destino, a mensagem pode ser preparada e fica nesse estado; nenhum disparo
 automático ocorre.
 
+Na opção `Preparação local`, mensagens geradas permanecem no estado
+`Preparada` e não são tratadas como enviadas. A opção `Desativado` impede a
+preparação automática; sem provedor de envio compatível, disparos automáticos
+permanecem bloqueados.
+
 Uma mensagem já aceita por um provedor não pode ser desfeita por uma pausa ou
 parada posterior. O motor espera a operação em andamento terminar no
 encerramento normal. A próxima execução fica em memória no APScheduler e é

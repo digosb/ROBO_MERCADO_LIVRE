@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -18,6 +18,7 @@ from .automation import (
     MANUAL_JOB_ID,
     AutomationRuntime,
     is_worker_online,
+    is_within_operating_hours,
 )
 from .mercadolivre import (
     OfferCandidate,
@@ -36,6 +37,7 @@ from .models import (
     Oferta,
     Produto,
 )
+from .reporting import build_report_metrics
 from .whatsapp import (
     WhatsAppDeliveryUnavailable,
     WhatsAppPreparationError,
@@ -81,10 +83,30 @@ class DashboardPageTests(TestCase):
             "dashboard:affiliates",
             "dashboard:whatsapp",
             "dashboard:history",
+            "dashboard:reports",
             "dashboard:settings",
         ):
             with self.subTest(page=name):
                 self.assertEqual(self.client.get(reverse(name)).status_code, 200)
+
+    def test_dashboard_shows_internal_alerts_only_when_enabled(self):
+        LogSistema.objects.create(
+            description="Alerta interno de teste",
+            severity=LogSistema.Severity.WARNING,
+        )
+        self.assertNotContains(
+            self.client.get(reverse("dashboard:dashboard")),
+            "Alerta interno de teste",
+        )
+
+        configuration = Configuracao.current()
+        configuration.notifications_enabled = True
+        configuration.save(update_fields=["notifications_enabled", "updated_at"])
+
+        self.assertContains(
+            self.client.get(reverse("dashboard:dashboard")),
+            "Alerta interno de teste",
+        )
 
 
 class RobotEndpointTests(TestCase):
@@ -289,7 +311,166 @@ class AffiliateLinkImportTests(TestCase):
         self.assertContains(response, "Pendente")
 
 
+class HistoryAndReportTests(TestCase):
+    def test_history_filters_real_sending_records_and_displays_snapshots(self):
+        today = timezone.localtime(timezone.now()).date()
+        sent_product = create_product(name="Fone divulgado")
+        sent_offer = create_offer(
+            sent_product,
+            promotion_type=Oferta.PromotionType.DISCOUNT,
+            status=Oferta.Status.AVAILABLE,
+        )
+        failed_product = create_product(2, name="Caixa de som")
+        failed_offer = create_offer(
+            failed_product,
+            promotion_type=Oferta.PromotionType.COUPON,
+        )
+        Envio.objects.create(
+            product=sent_product,
+            offer=sent_offer,
+            message="Mensagem enviada",
+            destination="Grupo público",
+            product_name_snapshot="Fone divulgado",
+            price_snapshot=Decimal("75.00"),
+            discount_snapshot=Decimal("25.00"),
+            affiliate_url="https://example.com/affiliate-fone",
+            status=Envio.Status.SENT,
+        )
+        Envio.objects.create(
+            product=failed_product,
+            offer=failed_offer,
+            message="Mensagem falha",
+            destination="Grupo público",
+            status=Envio.Status.FAILED,
+            created_at=timezone.make_aware(datetime.combine(today - timedelta(days=1), time(12))),
+        )
+        response = self.client.get(
+            reverse("dashboard:history"),
+            {
+                "date_from": today.isoformat(),
+                "date_to": today.isoformat(),
+                "product": "Fone",
+                "status": Envio.Status.SENT,
+                "offer_type": Oferta.PromotionType.DISCOUNT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Fone divulgado")
+        self.assertContains(response, "R$ 75,00")
+        self.assertContains(response, "25.00%")
+        self.assertContains(response, "https://example.com/affiliate-fone")
+        self.assertContains(response, "Grupo público")
+        self.assertContains(response, "Enviada")
+        self.assertNotContains(response, "Caixa de som")
+        self.assertEqual(response.context["sendings_page"].paginator.count, 1)
+
+    def test_history_rejects_reversed_date_range_without_returning_unfiltered_rows(self):
+        product = create_product()
+        offer = create_offer(product)
+        Envio.objects.create(
+            product=product,
+            offer=offer,
+            message="Mensagem",
+            destination="Grupo",
+            status=Envio.Status.SENT,
+        )
+        today = timezone.localtime(timezone.now()).date()
+
+        response = self.client.get(
+            reverse("dashboard:history"),
+            {
+                "date_from": (today + timedelta(days=1)).isoformat(),
+                "date_to": today.isoformat(),
+            },
+        )
+
+        self.assertContains(response, "A data final deve ser igual ou posterior à inicial.")
+        self.assertEqual(response.context["sendings_page"].paginator.count, 0)
+
+    def test_report_indicators_use_persisted_records_and_count_failures_once(self):
+        approved_product = create_product(name="Oferta aprovada")
+        approved_offer = create_offer(
+            approved_product,
+            status=Oferta.Status.AVAILABLE,
+        )
+        pending_product = create_product(2, name="Oferta não verificada")
+        pending_offer = create_offer(
+            pending_product,
+            status=Oferta.Status.UNKNOWN,
+        )
+        LinkAfiliado.objects.create(
+            product=approved_product,
+            original_url=approved_product.product_url,
+            affiliate_url="https://example.com/valid-report-link",
+            validation_status=LinkAfiliado.ValidationStatus.VALID,
+        )
+        LinkAfiliado.objects.create(
+            product=pending_product,
+            original_url=pending_product.product_url,
+            affiliate_url="https://example.com/pending-report-link",
+            validation_status=LinkAfiliado.ValidationStatus.PENDING,
+        )
+        Envio.objects.create(
+            product=approved_product,
+            offer=approved_offer,
+            message="Enviada",
+            destination="Grupo",
+            status=Envio.Status.SENT,
+        )
+        Envio.objects.create(
+            product=pending_product,
+            offer=pending_offer,
+            message="Falhou",
+            destination="Grupo",
+            status=Envio.Status.FAILED,
+        )
+        LogSistema.objects.create(
+            event_type=LogSistema.EventType.OFFER_SEARCH,
+            description="Falha real do provedor de busca",
+            severity=LogSistema.Severity.ERROR,
+        )
+        LogSistema.objects.create(
+            event_type=LogSistema.EventType.SEND,
+            description="Falha de envio já contada no registro",
+            severity=LogSistema.Severity.ERROR,
+        )
+
+        metrics = build_report_metrics()
+        response = self.client.get(reverse("dashboard:reports"))
+
+        self.assertEqual(metrics["offers_found"], 2)
+        self.assertEqual(metrics["offers_approved"], 1)
+        self.assertEqual(metrics["valid_affiliate_links"], 1)
+        self.assertEqual(metrics["messages_sent"], 1)
+        self.assertEqual(metrics["failures"], 2)
+        self.assertEqual(metrics["success_percentage"], Decimal("50.00"))
+        self.assertContains(response, "Percentual de sucesso")
+        self.assertContains(response, "50.00%")
+
+
 class ConfigurationTests(TestCase):
+    def settings_data(self, **overrides):
+        configuration = Configuracao.current()
+        data = {
+            "send_interval_minutes": str(configuration.send_interval_minutes),
+            "max_sends_per_day": str(configuration.max_sends_per_day),
+            "operating_hours_enabled": (
+                "on" if configuration.operating_hours_enabled else ""
+            ),
+            "operating_start_time": configuration.operating_start_time.strftime("%H:%M"),
+            "operating_end_time": configuration.operating_end_time.strftime("%H:%M"),
+            "whatsapp_destination": configuration.whatsapp_destination,
+            "notifications_enabled": (
+                "on" if configuration.notifications_enabled else ""
+            ),
+            "offer_provider": configuration.offer_provider,
+            "affiliate_provider": configuration.affiliate_provider,
+            "whatsapp_provider": configuration.whatsapp_provider,
+        }
+        data.update(overrides)
+        return data
+
     def test_configuration_defaults_to_ten_minutes_and_fifty_sends(self):
         response = self.client.get(reverse("dashboard:settings"))
 
@@ -302,26 +483,108 @@ class ConfigurationTests(TestCase):
             with self.subTest(interval=invalid):
                 self.client.post(
                     url,
-                    {
-                        "send_interval_minutes": invalid,
-                        "max_sends_per_day": "12",
-                    },
+                    self.settings_data(send_interval_minutes=invalid, max_sends_per_day="12"),
                 )
                 self.assertEqual(Configuracao.current().send_interval_minutes, 10)
                 self.assertEqual(Configuracao.current().max_sends_per_day, 50)
 
         self.client.post(
             url,
-            {"send_interval_minutes": "15", "max_sends_per_day": "12"},
+            self.settings_data(send_interval_minutes="15", max_sends_per_day="12"),
         )
         self.assertEqual(Configuracao.current().send_interval_minutes, 15)
         self.assertEqual(Configuracao.current().max_sends_per_day, 12)
 
         self.client.post(
             url,
-            {"send_interval_minutes": "15", "max_sends_per_day": "10001"},
+            self.settings_data(send_interval_minutes="15", max_sends_per_day="10001"),
         )
         self.assertEqual(Configuracao.current().max_sends_per_day, 12)
+
+    def test_settings_validate_hours_destination_and_provider_choices(self):
+        url = reverse("dashboard:settings")
+        initial = self.settings_data()
+
+        invalid_hours = self.client.post(
+            url,
+            {
+                **initial,
+                "operating_hours_enabled": "on",
+                "operating_start_time": "09:00",
+                "operating_end_time": "09:00",
+            },
+        )
+        self.assertEqual(invalid_hours.status_code, 200)
+        self.assertEqual(Configuracao.current().operating_hours_enabled, False)
+
+        invalid_destination = self.client.post(
+            url,
+            {**initial, "whatsapp_destination": "https://example.com/group"},
+        )
+        self.assertEqual(invalid_destination.status_code, 200)
+        self.assertEqual(Configuracao.current().whatsapp_destination, "")
+
+        invalid_provider = self.client.post(
+            url,
+            {**initial, "offer_provider": "not-a-provider"},
+        )
+        self.assertEqual(invalid_provider.status_code, 200)
+        self.assertEqual(
+            Configuracao.current().offer_provider,
+            Configuracao.OfferProvider.MARKETPLACE,
+        )
+
+    def test_settings_persist_operating_hours_notifications_and_available_providers(self):
+        response = self.client.post(
+            reverse("dashboard:settings"),
+            self.settings_data(
+                operating_hours_enabled="on",
+                operating_start_time="22:00",
+                operating_end_time="06:00",
+                whatsapp_destination="Grupo de ofertas",
+                notifications_enabled="on",
+                offer_provider=Configuracao.OfferProvider.DISABLED,
+                affiliate_provider=Configuracao.AffiliateProvider.DISABLED,
+                whatsapp_provider=Configuracao.WhatsAppProvider.DISABLED,
+            ),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        configuration = Configuracao.current()
+        self.assertTrue(configuration.operating_hours_enabled)
+        self.assertEqual(configuration.operating_start_time, time(22, 0))
+        self.assertEqual(configuration.operating_end_time, time(6, 0))
+        self.assertEqual(configuration.whatsapp_destination, "Grupo de ofertas")
+        self.assertTrue(configuration.notifications_enabled)
+        self.assertEqual(configuration.offer_provider, Configuracao.OfferProvider.DISABLED)
+        self.assertEqual(
+            configuration.affiliate_provider,
+            Configuracao.AffiliateProvider.DISABLED,
+        )
+        self.assertEqual(
+            configuration.whatsapp_provider,
+            Configuracao.WhatsAppProvider.DISABLED,
+        )
+
+    def test_official_whatsapp_provider_cannot_be_enabled_without_eligibility(self):
+        configuration = Configuracao.current()
+        configuration.whatsapp_provider = Configuracao.WhatsAppProvider.OFFICIAL_API
+
+        with self.assertRaises(ValidationError):
+            configuration.save()
+
+    def test_operating_window_supports_overnight_ranges(self):
+        configuration = Configuracao.current()
+        configuration.operating_hours_enabled = True
+        configuration.operating_start_time = time(22, 0)
+        configuration.operating_end_time = time(6, 0)
+        evening = timezone.make_aware(datetime(2026, 11, 26, 23, 0))
+        early_morning = timezone.make_aware(datetime(2026, 11, 27, 5, 0))
+        midday = timezone.make_aware(datetime(2026, 11, 27, 12, 0))
+
+        self.assertTrue(is_within_operating_hours(configuration, evening))
+        self.assertTrue(is_within_operating_hours(configuration, early_morning))
+        self.assertFalse(is_within_operating_hours(configuration, midday))
 
     def test_whatsapp_preview_requires_destination_and_does_not_send(self):
         url = reverse("whatsapp_prepare")
@@ -796,9 +1059,36 @@ class AutomationCycleTests(TestCase):
 
         envio = Envio.objects.get()
         self.assertEqual(envio.status, Envio.Status.PREPARED)
+        self.assertEqual(envio.product_name_snapshot, self.candidate.title)
+        self.assertEqual(envio.price_snapshot, Decimal("75.00"))
+        self.assertEqual(envio.discount_snapshot, Decimal("25.00"))
+        self.assertEqual(
+            envio.affiliate_url,
+            "https://example.com/validated-affiliate",
+        )
         self.assertEqual(MensagemWhatsApp.objects.get().status, MensagemWhatsApp.Status.PREPARED)
         self.assertEqual(Envio.objects.filter(status=Envio.Status.SENT).count(), 0)
         self.assertEqual(Envio.objects.filter(product=envio.product).count(), 1)
+
+    def test_cycle_does_not_prepare_or_send_when_delivery_is_disabled(self):
+        self.add_verified_link()
+        Configuracao.objects.filter(pk=self.configuration.pk).update(
+            whatsapp_provider=Configuracao.WhatsAppProvider.DISABLED
+        )
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider(),
+        )
+
+        runtime.run_cycle()
+
+        self.assertEqual(Envio.objects.count(), 0)
+        self.assertEqual(MensagemWhatsApp.objects.count(), 0)
+        self.assertTrue(
+            LogSistema.objects.filter(
+                description__contains="provedor de WhatsApp está desativado"
+            ).exists()
+        )
 
     def test_cycle_selects_at_most_one_offer(self):
         first_product = self.add_verified_link()
@@ -920,6 +1210,51 @@ class AutomationCycleTests(TestCase):
             LogSistema.objects.filter(description__contains="Ciclo interrompido").exists()
         )
 
+    def test_cycle_cancels_pending_delivery_when_paused_before_sending(self):
+        self.add_verified_link()
+
+        class TestDeliveryProvider:
+            is_authorized = True
+            is_connected = True
+
+            def __init__(inner_self):
+                inner_self.sent_messages = []
+
+            def supports_destination(inner_self, destination):
+                return True
+
+            def send(inner_self, destination, message):
+                inner_self.sent_messages.append((destination, message))
+                return "unexpected-send"
+
+        provider = TestDeliveryProvider()
+        Configuracao.objects.filter(pk=self.configuration.pk).update(
+            whatsapp_provider=Configuracao.WhatsAppProvider.OFFICIAL_API
+        )
+        original_prepare = prepare_offer_message
+
+        def prepare_then_pause(*args, **kwargs):
+            result = original_prepare(*args, **kwargs)
+            Configuracao.objects.filter(pk=self.configuration.pk).update(
+                status=Configuracao.Status.PAUSED
+            )
+            return result
+
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider(),
+            delivery_provider=provider,
+        )
+
+        with (
+            patch("dashboard.automation.is_official_delivery_ready", return_value=True),
+            patch("dashboard.automation.prepare_offer_message", side_effect=prepare_then_pause),
+        ):
+            runtime.run_cycle()
+
+        self.assertEqual(Envio.objects.get().status, Envio.Status.CANCELLED)
+        self.assertEqual(provider.sent_messages, [])
+
     def test_cycle_records_unavailable_discovery_provider(self):
         runtime = AutomationRuntime(scheduler=None)
 
@@ -932,6 +1267,33 @@ class AutomationCycleTests(TestCase):
                 event_type=LogSistema.EventType.OFFER_SEARCH,
                 severity=LogSistema.Severity.ERROR,
                 description__contains="campanhas LIGHTNING",
+            ).exists()
+        )
+
+    def test_cycle_is_skipped_outside_configured_operating_hours(self):
+        configuration = Configuracao.current()
+        configuration.operating_hours_enabled = True
+        configuration.operating_start_time = time(9, 0)
+        configuration.operating_end_time = time(17, 0)
+        configuration.save(
+            update_fields=[
+                "operating_hours_enabled",
+                "operating_start_time",
+                "operating_end_time",
+                "updated_at",
+            ]
+        )
+        provider = self.make_provider()
+        runtime = AutomationRuntime(scheduler=None, discovery_provider=provider)
+        early_morning = timezone.make_aware(datetime(2026, 11, 26, 2, 0))
+
+        with patch("dashboard.automation.timezone.now", return_value=early_morning):
+            runtime.run_cycle()
+
+        self.assertEqual(Oferta.objects.count(), 0)
+        self.assertTrue(
+            LogSistema.objects.filter(
+                description__contains="fora do horário de funcionamento",
             ).exists()
         )
 
@@ -951,6 +1313,10 @@ class AutomationCycleTests(TestCase):
                 return "provider-message-123"
 
         provider = AuthorizedProvider()
+        configuration = Configuracao.current()
+        configuration.whatsapp_provider = Configuracao.WhatsAppProvider.OFFICIAL_API
+        with patch("dashboard.whatsapp.get_delivery_provider", return_value=provider):
+            configuration.save(update_fields=["whatsapp_provider", "updated_at"])
         runtime = AutomationRuntime(
             scheduler=None,
             discovery_provider=self.make_provider(),
@@ -978,10 +1344,15 @@ class AutomationCycleTests(TestCase):
             def send(self, destination, message):
                 raise WhatsAppDeliveryUnavailable("Falha controlada pelo teste.")
 
+        provider = FailingProvider()
+        configuration = Configuracao.current()
+        configuration.whatsapp_provider = Configuracao.WhatsAppProvider.OFFICIAL_API
+        with patch("dashboard.whatsapp.get_delivery_provider", return_value=provider):
+            configuration.save(update_fields=["whatsapp_provider", "updated_at"])
         runtime = AutomationRuntime(
             scheduler=None,
             discovery_provider=self.make_provider(),
-            delivery_provider=FailingProvider(),
+            delivery_provider=provider,
         )
 
         runtime.run_cycle()

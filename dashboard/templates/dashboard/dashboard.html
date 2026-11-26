@@ -14,6 +14,14 @@
   <article class="metric-card"><div class="metric-top"><span class="metric-label">Mensagens enviadas</span><span class="metric-icon metric-blue"><svg class="icon"><use href="#i-send"/></svg></span></div><strong class="metric-value" id="metric-messages">{{ metrics.messages_sent }}</strong><span class="metric-foot">Envios reais confirmados</span></article>
   <article class="metric-card"><div class="metric-top"><span class="metric-label">Erros registrados</span><span class="metric-icon metric-red"><svg class="icon"><use href="#i-alert"/></svg></span></div><strong class="metric-value" id="metric-errors">{{ metrics.errors }}</strong><span class="metric-foot">Eventos classificados como erro</span></article>
 </div>
+{% if settings.notifications_enabled %}
+<section class="panel notification-panel">
+  <div class="panel-heading"><div><div class="eyebrow">ALERTAS INTERNOS</div><h2>Notificações recentes</h2></div><a class="text-link" href="{% url 'dashboard:history' %}">Ver histórico <svg class="icon"><use href="#i-arrow"/></svg></a></div>
+  {% if notifications %}
+    <div class="activity-list">{% for notification in notifications %}<article class="activity-item"><span class="activity-marker {% if notification.severity == 'error' or notification.severity == 'critical' %}activity-marker-error{% endif %}"><svg class="icon"><use href="{% if notification.severity == 'error' or notification.severity == 'critical' %}#i-alert{% else %}#i-check{% endif %}"/></svg></span><div class="activity-copy"><strong>{{ notification.description }}</strong><span>{{ notification.get_event_type_display }} · {{ notification.get_severity_display }}</span></div><time datetime="{{ notification.occurred_at|date:'c' }}">{{ notification.occurred_at|date:"d/m/Y H:i" }}</time></article>{% endfor %}</div>
+  {% else %}<p class="field-help">Nenhum alerta interno registrado.</p>{% endif %}
+</section>
+{% endif %}
 <div class="dashboard-grid">
   <section class="panel robot-panel">
     <div class="panel-heading"><div><div class="eyebrow">CONTROLE</div><h2>Estado do robô</h2></div><span class="status-chip status-{{ robot_state.status }}" id="robot-status"><span class="status-dot"></span><span id="robot-status-label">{{ robot_state.get_status_display }}</span></span></div>

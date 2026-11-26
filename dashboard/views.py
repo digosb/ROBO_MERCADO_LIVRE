@@ -1,14 +1,16 @@
 import json
 
 from django.contrib import messages
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.http import JsonResponse
+from django.core.paginator import Paginator
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from .afiliados import AffiliateLinkImportError, import_manual_affiliate_link
 from .automation import is_worker_online
+from .forms import ConfiguracaoForm, EnvioFilterForm
 from .models import (
     Configuracao,
     Envio,
@@ -17,21 +19,19 @@ from .models import (
     MensagemWhatsApp,
     Oferta,
 )
+from .reporting import build_report_metrics
 from .whatsapp import WhatsAppPreparationError, prepare_offer_message, validate_destination
 
 
 def _dashboard_context():
     configuration = Configuracao.current()
-    offers = Oferta.objects.aggregate(
-        total=Count("id"),
-        valid=Count("id", filter=Q(status=Oferta.Status.AVAILABLE)),
-    )
+    report_metrics = build_report_metrics()
     metrics = {
-        "offers_found": offers["total"],
-        "valid_offers": offers["valid"],
+        "offers_found": report_metrics["offers_found"],
+        "valid_offers": report_metrics["offers_approved"],
         "affiliate_links": LinkAfiliado.objects.count(),
-        "messages_sent": Envio.objects.filter(status=Envio.Status.SENT).count(),
-        "errors": LogSistema.objects.filter(severity=LogSistema.Severity.ERROR).count(),
+        "messages_sent": report_metrics["messages_sent"],
+        "errors": report_metrics["failures"],
     }
     return configuration, configuration, metrics
 
@@ -49,6 +49,17 @@ def dashboard(request):
             "worker_online": is_worker_online(state),
             "metrics": metrics,
             "recent_offers": recent_offers,
+            "notifications": (
+                LogSistema.objects.filter(
+                    severity__in=[
+                        LogSistema.Severity.WARNING,
+                        LogSistema.Severity.ERROR,
+                        LogSistema.Severity.CRITICAL,
+                    ]
+                )[:5]
+                if settings.notifications_enabled
+                else []
+            ),
         },
     )
 
@@ -131,12 +142,49 @@ def whatsapp(request):
 
 
 def history(request):
+    history_filter = EnvioFilterForm(request.GET)
+    sendings = Envio.objects.select_related("product", "offer")
+    if history_filter.is_valid():
+        filters = history_filter.cleaned_data
+        if filters["date_from"]:
+            sendings = sendings.filter(created_at__date__gte=filters["date_from"])
+        if filters["date_to"]:
+            sendings = sendings.filter(created_at__date__lte=filters["date_to"])
+        if filters["product"]:
+            sendings = sendings.filter(
+                Q(product_name_snapshot__icontains=filters["product"])
+                | Q(product__name__icontains=filters["product"])
+            )
+        if filters["status"]:
+            sendings = sendings.filter(status=filters["status"])
+        if filters["offer_type"]:
+            sendings = sendings.filter(offer__promotion_type=filters["offer_type"])
+    else:
+        sendings = sendings.none()
+
+    sendings_page = Paginator(sendings, 25).get_page(request.GET.get("page"))
+    query_params = request.GET.copy()
+    query_params.pop("page", None)
     return render(
         request,
         "dashboard/history.html",
         {
             "active_page": "history",
-            "events": LogSistema.objects.all()[:100],
+            "history_filter": history_filter,
+            "sendings_page": sendings_page,
+            "filter_query": query_params.urlencode(),
+            "events": LogSistema.objects.all()[:50],
+        },
+    )
+
+
+def reports(request):
+    return render(
+        request,
+        "dashboard/reports.html",
+        {
+            "active_page": "reports",
+            "report": build_report_metrics(),
         },
     )
 
@@ -144,46 +192,28 @@ def history(request):
 def settings_page(request):
     settings = Configuracao.current()
     if request.method == "POST":
-        raw_interval = request.POST.get("send_interval_minutes", "").strip()
-        raw_max_sends = request.POST.get("max_sends_per_day", "").strip()
-        try:
-            interval = int(raw_interval)
-            max_sends = (
-                int(raw_max_sends)
-                if raw_max_sends
-                else settings.max_sends_per_day
-            )
-        except ValueError:
-            messages.error(
-                request,
-                "Informe o intervalo e o limite diário como números inteiros válidos.",
-            )
-        else:
-            if not 1 <= interval <= 1440:
-                messages.error(request, "O intervalo deve estar entre 1 e 1440 minutos.")
-            elif not 1 <= max_sends <= 10000:
-                messages.error(
-                    request,
-                    "O limite diário deve estar entre 1 e 10000 envios.",
-                )
-            else:
-                settings.send_interval_minutes = interval
-                settings.max_sends_per_day = max_sends
-                settings.save(
-                    update_fields=[
-                        "send_interval_minutes",
-                        "max_sends_per_day",
-                        "updated_at",
-                    ]
-                )
-                messages.success(request, "Configurações salvas.")
-        return redirect("dashboard:settings")
+        form = ConfiguracaoForm(request.POST, instance=settings)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Configurações salvas.")
+            return redirect("dashboard:settings")
+        messages.error(request, "Revise os campos destacados; as configurações não foram alteradas.")
+        return render(
+            request,
+            "dashboard/settings.html",
+            {
+                "active_page": "settings",
+                "settings": settings,
+                "settings_form": form,
+            },
+        )
     return render(
         request,
         "dashboard/settings.html",
         {
             "active_page": "settings",
             "settings": settings,
+            "settings_form": ConfiguracaoForm(instance=settings),
         },
     )
 

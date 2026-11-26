@@ -24,6 +24,7 @@ from .whatsapp import (
     WhatsAppDeliveryUnavailable,
     WhatsAppPreparationError,
     get_delivery_provider,
+    is_official_delivery_ready,
     prepare_offer_message,
 )
 
@@ -39,6 +40,17 @@ def is_worker_online(configuration=None):
         configuration.worker_heartbeat
         and timezone.now() - configuration.worker_heartbeat <= WORKER_HEARTBEAT_TIMEOUT
     )
+
+
+def is_within_operating_hours(configuration, moment=None):
+    if not configuration.operating_hours_enabled:
+        return True
+    local_time = timezone.localtime(moment or timezone.now()).time().replace(tzinfo=None)
+    start = configuration.operating_start_time
+    end = configuration.operating_end_time
+    if start < end:
+        return start <= local_time < end
+    return local_time >= start or local_time < end
 
 
 class AutomationProcessLock:
@@ -183,6 +195,20 @@ class AutomationRuntime:
                 last_execution=started_at,
                 updated_at=started_at,
             )
+            if not is_within_operating_hours(configuration, started_at):
+                self._log(
+                    "Ciclo ignorado: fora do horário de funcionamento configurado.",
+                    LogSistema.Severity.INFO,
+                    offer_search=True,
+                )
+                return
+            if configuration.offer_provider == Configuracao.OfferProvider.DISABLED:
+                self._log(
+                    "Ciclo ignorado: o provedor de ofertas está desativado.",
+                    LogSistema.Severity.WARNING,
+                    offer_search=True,
+                )
+                return
             try:
                 candidates = discover_flash_deals(self.discovery_provider)
             except OfferDiscoveryError as error:
@@ -239,13 +265,36 @@ class AutomationRuntime:
                 )
                 if affiliate_link is None:
                     continue
+                if (
+                    configuration.affiliate_provider
+                    != Configuracao.AffiliateProvider.MANUAL_IMPORT
+                ):
+                    self._log(
+                        f"Oferta {offer.pk} ignorada: o provedor de afiliados está desativado.",
+                        LogSistema.Severity.WARNING,
+                    )
+                    continue
                 if not configuration.whatsapp_destination:
                     self._log(
                         f"Oferta {offer.pk} ignorada: configure um destino antes de preparar mensagens.",
                         LogSistema.Severity.WARNING,
                     )
                     continue
-                self._prepare_or_send(configuration, offer, expected_control_changed_at)
+                if (
+                    configuration.whatsapp_provider
+                    == Configuracao.WhatsAppProvider.DISABLED
+                ):
+                    self._log(
+                        "Oferta elegível não processada: o provedor de WhatsApp está desativado.",
+                        LogSistema.Severity.WARNING,
+                    )
+                    continue
+                self._prepare_or_send(
+                    configuration,
+                    offer,
+                    affiliate_link,
+                    expected_control_changed_at,
+                )
                 return
 
             self._log(
@@ -321,7 +370,13 @@ class AutomationRuntime:
             ],
         ).exists()
 
-    def _prepare_or_send(self, configuration, offer, expected_control_changed_at):
+    def _prepare_or_send(
+        self,
+        configuration,
+        offer,
+        affiliate_link,
+        expected_control_changed_at,
+    ):
         try:
             prepared = prepare_offer_message(
                 offer_id=offer.pk,
@@ -342,9 +397,11 @@ class AutomationRuntime:
             message_record.save(update_fields=["status", "error_detail"])
 
         can_deliver = bool(
-            self.delivery_provider.is_authorized
-            and self.delivery_provider.is_connected
-            and self.delivery_provider.supports_destination(configuration.whatsapp_destination)
+            configuration.whatsapp_provider == Configuracao.WhatsAppProvider.OFFICIAL_API
+            and is_official_delivery_ready(
+                configuration.whatsapp_destination,
+                provider=self.delivery_provider,
+            )
         )
         try:
             envio = Envio.objects.create(
@@ -352,6 +409,10 @@ class AutomationRuntime:
                 offer=offer,
                 message=message_record.message,
                 destination=configuration.whatsapp_destination,
+                product_name_snapshot=offer.product.name,
+                price_snapshot=offer.promotional_price,
+                discount_snapshot=offer.discount_percent,
+                affiliate_url=affiliate_link.affiliate_url,
                 status=Envio.Status.PENDING if can_deliver else Envio.Status.PREPARED,
             )
         except (ValidationError, IntegrityError) as error:
@@ -397,6 +458,7 @@ class AutomationRuntime:
             self._log(
                 f"Envio automático da oferta {offer.pk} falhou: {error}",
                 LogSistema.Severity.ERROR,
+                event_type=LogSistema.EventType.SEND,
             )
             return
 

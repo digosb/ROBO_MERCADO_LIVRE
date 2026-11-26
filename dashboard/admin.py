@@ -43,10 +43,23 @@ class LinkAfiliadoAdmin(admin.ModelAdmin):
 
 @admin.register(Envio)
 class EnvioAdmin(admin.ModelAdmin):
-    list_display = ("product", "offer", "destination", "status", "created_at", "external_id")
+    list_display = (
+        "product_name_snapshot",
+        "price_snapshot",
+        "destination",
+        "status",
+        "created_at",
+        "external_id",
+    )
     list_filter = ("status", "created_at")
     search_fields = ("product__name", "offer__product__external_id", "destination", "external_id")
-    readonly_fields = ("created_at",)
+    readonly_fields = (
+        "created_at",
+        "product_name_snapshot",
+        "price_snapshot",
+        "discount_snapshot",
+        "affiliate_url",
+    )
 
 
 @admin.register(MensagemWhatsApp)
@@ -59,7 +72,15 @@ class MensagemWhatsAppAdmin(admin.ModelAdmin):
 
 @admin.register(Configuracao)
 class ConfiguracaoAdmin(admin.ModelAdmin):
-    list_display = ("status", "send_interval_minutes", "max_sends_per_day", "updated_at")
+    list_display = (
+        "status",
+        "send_interval_minutes",
+        "max_sends_per_day",
+        "offer_provider",
+        "affiliate_provider",
+        "whatsapp_provider",
+        "updated_at",
+    )
     readonly_fields = ("updated_at",)
 
 

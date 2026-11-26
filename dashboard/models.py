@@ -1,3 +1,4 @@
+from datetime import time
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
@@ -223,6 +224,35 @@ class Envio(models.Model):
     )
     message = models.TextField(max_length=4096, verbose_name="Mensagem")
     destination = models.CharField(max_length=120, verbose_name="Destino")
+    product_name_snapshot = models.CharField(
+        max_length=300,
+        blank=True,
+        verbose_name="Produto divulgado",
+    )
+    price_snapshot = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        verbose_name="Preço divulgado",
+    )
+    discount_snapshot = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[
+            MinValueValidator(Decimal("0.00")),
+            MaxValueValidator(Decimal("100.00")),
+        ],
+        verbose_name="Desconto divulgado",
+    )
+    affiliate_url = models.URLField(
+        max_length=2048,
+        blank=True,
+        verbose_name="Link de afiliado divulgado",
+    )
     status = models.CharField(
         max_length=10,
         choices=Status.choices,
@@ -339,6 +369,19 @@ class Configuracao(models.Model):
         RUNNING = "running", "Em execução"
         PAUSED = "paused", "Pausado"
 
+    class OfferProvider(models.TextChoices):
+        MARKETPLACE = "mercadolivre", "Mercado Livre (busca geral indisponível)"
+        DISABLED = "disabled", "Desativado"
+
+    class AffiliateProvider(models.TextChoices):
+        MANUAL_IMPORT = "manual_import", "Importação manual autorizada"
+        DISABLED = "disabled", "Desativado"
+
+    class WhatsAppProvider(models.TextChoices):
+        DISABLED = "disabled", "Desativado"
+        PREPARATION_ONLY = "preparation_only", "Preparação local (sem envio)"
+        OFFICIAL_API = "official_api", "API oficial (indisponível para este destino)"
+
     send_interval_minutes = models.PositiveIntegerField(
         default=10,
         validators=[MinValueValidator(1), MaxValueValidator(1440)],
@@ -348,6 +391,40 @@ class Configuracao(models.Model):
         default=50,
         validators=[MinValueValidator(1), MaxValueValidator(10000)],
         verbose_name="Quantidade máxima de envios por dia",
+    )
+    operating_hours_enabled = models.BooleanField(
+        default=False,
+        verbose_name="Restringir por horário de funcionamento",
+    )
+    operating_start_time = models.TimeField(
+        default=time(9, 0),
+        verbose_name="Início do horário de funcionamento",
+    )
+    operating_end_time = models.TimeField(
+        default=time(17, 0),
+        verbose_name="Fim do horário de funcionamento",
+    )
+    notifications_enabled = models.BooleanField(
+        default=False,
+        verbose_name="Notificações internas do painel",
+    )
+    offer_provider = models.CharField(
+        max_length=24,
+        choices=OfferProvider.choices,
+        default=OfferProvider.MARKETPLACE,
+        verbose_name="Provedor de ofertas",
+    )
+    affiliate_provider = models.CharField(
+        max_length=24,
+        choices=AffiliateProvider.choices,
+        default=AffiliateProvider.MANUAL_IMPORT,
+        verbose_name="Provedor de afiliados",
+    )
+    whatsapp_provider = models.CharField(
+        max_length=24,
+        choices=WhatsAppProvider.choices,
+        default=WhatsAppProvider.PREPARATION_ONLY,
+        verbose_name="Provedor de WhatsApp",
     )
     status = models.CharField(
         max_length=12,
@@ -410,6 +487,38 @@ class Configuracao(models.Model):
             raise ValidationError(
                 {"execution_settings": "As configurações de execução devem ser um objeto JSON."}
             )
+        if (
+            self.operating_hours_enabled
+            and self.operating_start_time == self.operating_end_time
+        ):
+            raise ValidationError(
+                {
+                    "operating_end_time": (
+                        "Os horários de início e fim devem ser diferentes quando "
+                        "a restrição de funcionamento está ativada."
+                    )
+                }
+            )
+        if self.whatsapp_destination:
+            from .whatsapp import WhatsAppPreparationError, validate_destination
+
+            try:
+                self.whatsapp_destination = validate_destination(self.whatsapp_destination)
+            except WhatsAppPreparationError as error:
+                raise ValidationError({"whatsapp_destination": str(error)}) from error
+
+        if self.whatsapp_provider == self.WhatsAppProvider.OFFICIAL_API:
+            from .whatsapp import is_official_delivery_ready
+
+            if not is_official_delivery_ready(self.whatsapp_destination):
+                raise ValidationError(
+                    {
+                        "whatsapp_provider": (
+                            "A API oficial não está autorizada, conectada e validada "
+                            "para o destino configurado."
+                        )
+                    }
+                )
 
     def save(self, *args, **kwargs):
         self.full_clean()

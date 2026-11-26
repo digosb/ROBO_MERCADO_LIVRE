@@ -1,0 +1,15 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Relatórios{% endblock %}
+{% block breadcrumb %}Relatórios{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>INDICADORES REAIS</div><h1>Relatórios</h1><p>Resumo calculado diretamente dos registros persistidos no banco.</p></div></div>
+<div class="report-metrics-grid">
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Ofertas encontradas</span><span class="metric-icon metric-purple"><svg class="icon"><use href="#i-search"/></svg></span></div><strong class="metric-value">{{ report.offers_found }}</strong><span class="metric-foot">Total de ofertas registradas</span></article>
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Ofertas aprovadas</span><span class="metric-icon metric-green"><svg class="icon"><use href="#i-check"/></svg></span></div><strong class="metric-value">{{ report.offers_approved }}</strong><span class="metric-foot">Disponíveis no banco</span></article>
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Links válidos</span><span class="metric-icon metric-orange"><svg class="icon"><use href="#i-link"/></svg></span></div><strong class="metric-value">{{ report.valid_affiliate_links }}</strong><span class="metric-foot">Validação registrada como válida</span></article>
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Mensagens enviadas</span><span class="metric-icon metric-blue"><svg class="icon"><use href="#i-send"/></svg></span></div><strong class="metric-value">{{ report.messages_sent }}</strong><span class="metric-foot">Envios confirmados pelo provedor</span></article>
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Falhas</span><span class="metric-icon metric-red"><svg class="icon"><use href="#i-alert"/></svg></span></div><strong class="metric-value">{{ report.failures }}</strong><span class="metric-foot">{{ report.failed_sends }} envios · {{ report.system_failures }} falhas de sistema</span></article>
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Percentual de sucesso</span><span class="metric-icon metric-green"><svg class="icon"><use href="#i-chart"/></svg></span></div><strong class="metric-value">{{ report.success_percentage|floatformat:2 }}%</strong><span class="metric-foot">{{ report.messages_sent }} de {{ report.completed_attempts }} tentativas concluídas</span></article>
+</div>
+<section class="panel report-note"><div class="panel-heading"><div><div class="eyebrow">CRITÉRIO</div><h2>Como os indicadores são calculados</h2></div></div><p>“Aprovadas” conta ofertas com status disponível. O percentual de sucesso usa envios enviados e falhos; registros aguardando, preparados ou cancelados não entram no denominador. As falhas somam envios falhos e erros/críticos do sistema, sem contar duas vezes os eventos de envio.</p></section>
+{% endblock %}
