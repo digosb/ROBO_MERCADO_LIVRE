@@ -27,9 +27,10 @@ class OfertaAdmin(admin.ModelAdmin):
 
 @admin.register(LinkAfiliado)
 class LinkAfiliadoAdmin(admin.ModelAdmin):
-    list_display = ("product", "validation_status", "generated_at")
-    list_filter = ("validation_status", "generated_at")
-    search_fields = ("product__name", "affiliate_url")
+    list_display = ("product", "validation_status", "generated_at", "registered_at")
+    list_filter = ("validation_status", "registered_at")
+    search_fields = ("product__name", "original_url", "affiliate_url")
+    readonly_fields = ("registered_at",)
 
 
 @admin.register(Envio)

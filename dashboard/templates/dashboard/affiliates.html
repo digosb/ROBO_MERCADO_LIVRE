@@ -2,10 +2,26 @@
 {% block title %}Afiliados{% endblock %}
 {% block breadcrumb %}Afiliados{% endblock %}
 {% block content %}
-<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>MONETIZAÇÃO</div><h1>Links de afiliados</h1><p>Acompanhe os links associados às ofertas cadastradas.</p></div></div>
-<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-spark"/></svg></span><div><strong>Integração de afiliados não configurada</strong><p>Esta página mostra somente links reais já salvos junto a uma oferta.</p></div></div>
-<section class="panel offers-panel"><div class="panel-heading"><div><div class="eyebrow">LINKS REGISTRADOS</div><h2>Ofertas afiliadas</h2></div><span class="count-pill">{{ affiliate_links|length }} link{{ affiliate_links|length|pluralize:"s" }}</span></div>
-  {% if affiliate_links %}<div class="table-wrap"><table><thead><tr><th>PRODUTO</th><th>LINK AFILIADO</th><th>SITUAÇÃO</th><th>GERADO EM</th></tr></thead><tbody>{% for affiliate_link in affiliate_links %}<tr><td>{{ affiliate_link.product.name }}</td><td><a class="table-link" href="{{ affiliate_link.affiliate_url }}" target="_blank" rel="noopener noreferrer">Abrir link <svg class="icon"><use href="#i-arrow"/></svg></a></td><td><span class="offer-status offer-status-{{ affiliate_link.validation_status }}">{{ affiliate_link.get_validation_status_display }}</span></td><td>{{ affiliate_link.generated_at|date:"d/m/Y H:i" }}</td></tr>{% endfor %}</tbody></table></div>
-  {% else %}<div class="empty-state"><span class="empty-icon"><svg class="icon"><use href="#i-link"/></svg></span><strong>Nenhum link de afiliado registrado</strong><p>Não há links vinculados às ofertas atuais. A integração e geração de links ainda não foram configuradas.</p><a class="button button-secondary" href="{% url 'dashboard:offers' %}">Ver ofertas</a></div>{% endif %}
+<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>MONETIZAÇÃO</div><h1>Links de afiliados</h1><p>Acompanhe os links associados aos produtos cadastrados.</p></div></div>
+<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-alert"/></svg></span><div><strong>Importação manual; sem validação automática</strong><p>Gere o link na ferramenta oficial da sua conta e cole-o abaixo. O painel verifica URLs e associação ao produto, mas não consegue confirmar o rastreamento de afiliado.</p></div></div>
+<section class="panel settings-panel">
+  <div class="panel-heading"><div><div class="eyebrow">IMPORTAÇÃO AUTORIZADA</div><h2>Registrar link da sua conta</h2></div><span class="panel-heading-icon"><svg class="icon"><use href="#i-link"/></svg></span></div>
+  <form method="post" class="settings-form affiliate-import-form">
+    {% csrf_token %}
+    <label for="original-url">URL original do produto</label>
+    <input id="original-url" name="original_url" type="url" maxlength="2048" placeholder="https://..." required>
+    <span class="field-help">O produto precisa estar cadastrado no painel com esta URL.</span>
+    <label for="affiliate-url">Link gerado pela ferramenta oficial</label>
+    <input id="affiliate-url" name="affiliate_url" type="url" maxlength="2048" placeholder="Cole o link da sua conta" required>
+    <span class="field-help">Não transforme nem acrescente parâmetros manualmente.</span>
+    <label for="generated-date">Data em que o link foi gerado (opcional)</label>
+    <input id="generated-date" name="generated_date" type="date">
+    <div class="settings-info"><span class="info-icon"><svg class="icon"><use href="#i-alert"/></svg></span><p>O link será salvo como pendente. Uma URL válida não comprova que ela está vinculada ao programa de afiliados.</p></div>
+    <button class="button button-primary" type="submit">Registrar link</button>
+  </form>
+</section>
+<section class="panel offers-panel affiliate-links-panel"><div class="panel-heading"><div><div class="eyebrow">LINKS REGISTRADOS</div><h2>Links vinculados aos produtos</h2></div><span class="count-pill">{{ affiliate_links|length }} link{{ affiliate_links|length|pluralize:"s" }}</span></div>
+  {% if affiliate_links %}<div class="table-wrap"><table><thead><tr><th>PRODUTO</th><th>URL ORIGINAL</th><th>URL DE AFILIADO</th><th>GERADO EM</th><th>REGISTRADO EM</th><th>SITUAÇÃO</th></tr></thead><tbody>{% for affiliate_link in affiliate_links %}<tr><td>{{ affiliate_link.product.name }}</td><td><a class="table-link" href="{{ affiliate_link.original_url }}" target="_blank" rel="noopener noreferrer">Abrir original <svg class="icon"><use href="#i-arrow"/></svg></a></td><td><a class="table-link" href="{{ affiliate_link.affiliate_url }}" target="_blank" rel="noopener noreferrer">Abrir link <svg class="icon"><use href="#i-arrow"/></svg></a></td><td>{% if affiliate_link.generated_at %}{{ affiliate_link.generated_at|date:"d/m/Y H:i" }}{% else %}Não informada{% endif %}</td><td>{{ affiliate_link.registered_at|date:"d/m/Y H:i" }}</td><td><span class="offer-status offer-status-{{ affiliate_link.validation_status }}">{{ affiliate_link.get_validation_status_display }}</span></td></tr>{% endfor %}</tbody></table></div>
+  {% else %}<div class="empty-state compact-empty"><span class="empty-icon"><svg class="icon"><use href="#i-link"/></svg></span><strong>Nenhum link registrado</strong><p>Importe um link criado no programa oficial. A validação permanece pendente até ser confirmada fora deste painel.</p></div>{% endif %}
 </section>
 {% endblock %}

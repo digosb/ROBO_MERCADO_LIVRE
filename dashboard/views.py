@@ -7,6 +7,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
+from .afiliados import AffiliateLinkImportError, import_manual_affiliate_link
 from .mercadolivre import (
     OfferDiscoveryRateLimited,
     OfferDiscoveryUnavailable,
@@ -60,6 +61,25 @@ def offers(request):
 
 
 def affiliates(request):
+    if request.method == "POST":
+        try:
+            result = import_manual_affiliate_link(
+                original_url=request.POST.get("original_url", ""),
+                affiliate_url=request.POST.get("affiliate_url", ""),
+                generated_date=request.POST.get("generated_date", "").strip(),
+            )
+        except AffiliateLinkImportError as error:
+            messages.error(request, str(error))
+        else:
+            if result.created:
+                messages.success(
+                    request,
+                    "Link importado. A validação de afiliação permanece pendente.",
+                )
+            else:
+                messages.warning(request, "Esse link já estava registrado para o produto.")
+        return redirect("dashboard:affiliates")
+
     affiliate_links = LinkAfiliado.objects.select_related("product")
     return render(
         request,

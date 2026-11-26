@@ -17,7 +17,7 @@ class Produto(models.Model):
         verbose_name="Identificador externo",
     )
     image_url = models.URLField(blank=True, verbose_name="Imagem")
-    product_url = models.URLField(unique=True, verbose_name="URL original")
+    product_url = models.URLField(max_length=2048, unique=True, verbose_name="URL original")
     category = models.CharField(max_length=180, blank=True, verbose_name="Categoria")
     created_at = models.DateTimeField(default=timezone.now, verbose_name="Data de cadastro")
 
@@ -156,18 +156,27 @@ class LinkAfiliado(models.Model):
         related_name="affiliate_links",
         verbose_name="Produto",
     )
-    original_url = models.URLField(verbose_name="URL original")
-    affiliate_url = models.URLField(verbose_name="URL afiliada")
+    original_url = models.URLField(max_length=2048, verbose_name="URL original")
+    affiliate_url = models.URLField(max_length=2048, verbose_name="URL afiliada")
     validation_status = models.CharField(
         max_length=10,
         choices=ValidationStatus.choices,
         default=ValidationStatus.PENDING,
         verbose_name="Status de validação",
     )
-    generated_at = models.DateTimeField(default=timezone.now, verbose_name="Data de geração")
+    generated_at = models.DateTimeField(
+        default=None,
+        null=True,
+        blank=True,
+        verbose_name="Data de geração",
+    )
+    registered_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name="Data de registro",
+    )
 
     class Meta:
-        ordering = ["-generated_at"]
+        ordering = ["-registered_at"]
         constraints = [
             models.UniqueConstraint(
                 fields=["product", "affiliate_url"],
@@ -351,6 +360,7 @@ class LogSistema(models.Model):
         ROBOT_STOPPED = "robot_stopped", "Robô parado"
         OFFER_SEARCH = "offer_search", "Busca de ofertas"
         WHATSAPP_PREVIEW = "whatsapp_preview", "Prévia de WhatsApp"
+        AFFILIATE_IMPORT = "affiliate_import", "Importação de link afiliado"
         SEND = "send", "Envio"
         SYSTEM = "system", "Sistema"
 

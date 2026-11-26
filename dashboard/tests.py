@@ -17,6 +17,7 @@ from .mercadolivre import (
     OfferProviderError,
     discover_flash_deals,
 )
+from .afiliados import import_manual_affiliate_link
 from .models import (
     Configuracao,
     Envio,
@@ -103,6 +104,152 @@ class RobotEndpointTests(TestCase):
         response = self.client.post(reverse("robot_action", args=["reboot"]))
 
         self.assertEqual(response.status_code, 404)
+
+
+class AffiliateLinkImportTests(TestCase):
+    def test_import_supports_long_product_and_affiliate_urls(self):
+        original_url = f"https://example.com/produto?referencia={'a' * 220}"
+        affiliate_url = f"https://example.com/affiliate?referencia={'b' * 220}"
+        product = create_product(product_url=original_url)
+
+        result = import_manual_affiliate_link(original_url, affiliate_url)
+
+        self.assertGreater(len(result.link.original_url), 200)
+        self.assertGreater(len(result.link.affiliate_url), 200)
+
+    def test_generation_date_is_not_assumed_when_model_is_created_directly(self):
+        product = create_product()
+
+        link = LinkAfiliado.objects.create(
+            product=product,
+            original_url=product.product_url,
+            affiliate_url="https://example.com/afiliado-sem-data",
+        )
+
+        self.assertIsNone(link.generated_at)
+
+    def test_manual_import_associates_product_and_keeps_affiliate_validation_pending(self):
+        product = create_product()
+        response = self.client.post(
+            reverse("dashboard:affiliates"),
+            {
+                "original_url": product.product_url,
+                "affiliate_url": "https://example.com/afiliado-validacao-manual",
+                "generated_date": "2026-11-25",
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "validação de afiliação permanece pendente")
+        link = LinkAfiliado.objects.get()
+        self.assertEqual(link.product, product)
+        self.assertEqual(link.original_url, product.product_url)
+        self.assertEqual(
+            link.validation_status,
+            LinkAfiliado.ValidationStatus.PENDING,
+        )
+        self.assertEqual(
+            timezone.localtime(link.generated_at).date().isoformat(),
+            "2026-11-25",
+        )
+        self.assertIsNotNone(link.registered_at)
+        self.assertEqual(
+            LogSistema.objects.get().event_type,
+            LogSistema.EventType.AFFILIATE_IMPORT,
+        )
+
+    def test_duplicate_manual_import_is_idempotent(self):
+        product = create_product()
+        values = {
+            "original_url": product.product_url,
+            "affiliate_url": "https://example.com/afiliado-duplicado",
+        }
+
+        first = import_manual_affiliate_link(**values)
+        second = import_manual_affiliate_link(**values)
+
+        self.assertTrue(first.created)
+        self.assertFalse(second.created)
+        self.assertEqual(first.link.pk, second.link.pk)
+        self.assertIsNone(first.link.generated_at)
+        self.assertEqual(LinkAfiliado.objects.count(), 1)
+        self.assertEqual(LogSistema.objects.count(), 2)
+
+    def test_manual_import_rejects_unknown_product_and_non_http_urls(self):
+        unknown_product = self.client.post(
+            reverse("dashboard:affiliates"),
+            {
+                "original_url": "https://example.com/not-catalogued",
+                "affiliate_url": "https://example.com/affiliate",
+            },
+            follow=True,
+        )
+        invalid_url = self.client.post(
+            reverse("dashboard:affiliates"),
+            {
+                "original_url": "https://example.com/produto",
+                "affiliate_url": "javascript:alert(1)",
+            },
+            follow=True,
+        )
+
+        self.assertContains(unknown_product, "Não existe produto cadastrado")
+        self.assertContains(invalid_url, "URL HTTP ou HTTPS válida")
+        self.assertEqual(LinkAfiliado.objects.count(), 0)
+        self.assertEqual(
+            LogSistema.objects.filter(
+                event_type=LogSistema.EventType.AFFILIATE_IMPORT,
+                severity=LogSistema.Severity.WARNING,
+            ).count(),
+            2,
+        )
+
+    def test_manual_import_rejects_embedded_credentials_and_invalid_generation_date(self):
+        product = create_product()
+        credential_in_url = self.client.post(
+            reverse("dashboard:affiliates"),
+            {
+                "original_url": product.product_url,
+                "affiliate_url": "https://user:password@example.com/affiliate",
+            },
+            follow=True,
+        )
+        invalid_date = self.client.post(
+            reverse("dashboard:affiliates"),
+            {
+                "original_url": product.product_url,
+                "affiliate_url": "https://example.com/affiliate",
+                "generated_date": "2026-02-30",
+            },
+            follow=True,
+        )
+
+        self.assertContains(credential_in_url, "não pode conter credenciais")
+        self.assertContains(invalid_date, "data de geração informada é inválida")
+        self.assertEqual(LinkAfiliado.objects.count(), 0)
+        self.assertEqual(
+            LogSistema.objects.filter(
+                event_type=LogSistema.EventType.AFFILIATE_IMPORT,
+                severity=LogSistema.Severity.WARNING,
+            ).count(),
+            2,
+        )
+
+    def test_affiliates_page_shows_original_affiliate_and_generation_date(self):
+        product = create_product()
+        result = import_manual_affiliate_link(
+            product.product_url,
+            "https://example.com/afiliado-pagina",
+            "2026-11-24",
+        )
+
+        response = self.client.get(reverse("dashboard:affiliates"))
+
+        self.assertContains(response, product.name)
+        self.assertContains(response, product.product_url)
+        self.assertContains(response, result.link.affiliate_url)
+        self.assertContains(response, "24/11/2026")
+        self.assertContains(response, "Pendente")
 
 
 class ConfigurationTests(TestCase):
