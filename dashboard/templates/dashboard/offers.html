@@ -1,0 +1,15 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Ofertas{% endblock %}
+{% block breadcrumb %}Ofertas{% endblock %}
+{% block content %}
+<div class="page-heading heading-with-action"><div><div class="eyebrow"><span class="eyebrow-line"></span>CATÁLOGO</div><h1>Ofertas</h1><p>Produtos identificados e armazenados pelo sistema.</p></div><button class="button button-primary" type="button" data-robot-action data-action-url="{% url 'robot_action' action='search' %}"><svg class="icon"><use href="#i-refresh"/></svg>Buscar ofertas</button></div>
+<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-spark"/></svg></span><div><strong>Busca em modo demonstração</strong><p>O motor ainda não consulta o Mercado Livre. Esta lista exibe somente registros existentes no banco de dados.</p></div></div>
+<section class="panel offers-panel">
+  <div class="panel-heading"><div><div class="eyebrow">REGISTROS</div><h2>Catálogo de ofertas</h2></div><span class="count-pill">{{ offers|length }} registro{{ offers|length|pluralize:"s" }}</span></div>
+  {% if offers %}
+  <div class="table-wrap"><table class="offers-table"><thead><tr><th>PRODUTO</th><th>PREÇO ORIGINAL</th><th>PREÇO PROMOCIONAL</th><th>DESCONTO</th><th>LINK</th><th>SITUAÇÃO</th><th>IDENTIFICADA EM</th></tr></thead><tbody>
+    {% for offer in offers %}<tr><td><div class="product-cell">{% if offer.product.image_url %}<img class="product-image" src="{{ offer.product.image_url }}" alt="" loading="lazy">{% else %}<span class="product-placeholder"><svg class="icon"><use href="#i-box"/></svg></span>{% endif %}<span class="product-name">{{ offer.product.name }}</span></div></td><td class="muted-price">R$ {{ offer.original_price|floatformat:2 }}</td><td class="price-strong">R$ {{ offer.promotional_price|floatformat:2 }}</td><td><span class="discount-pill">-{{ offer.discount_percent }}%</span></td><td><a class="table-link" href="{{ offer.product.product_url }}" target="_blank" rel="noopener noreferrer">Abrir <svg class="icon"><use href="#i-arrow"/></svg></a></td><td><span class="offer-status offer-status-{{ offer.status }}">{{ offer.get_status_display }}</span></td><td>{{ offer.identified_at|date:"d/m/Y H:i" }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state"><span class="empty-icon"><svg class="icon"><use href="#i-tag"/></svg></span><strong>Nenhuma oferta por aqui</strong><p>A tabela será preenchida apenas com ofertas realmente registradas. Não há dados de demonstração misturados aos dados reais.</p><button class="button button-secondary" type="button" data-robot-action data-action-url="{% url 'robot_action' action='search' %}"><svg class="icon"><use href="#i-refresh"/></svg>Testar busca simulada</button></div>{% endif %}
+</section>
+{% endblock %}

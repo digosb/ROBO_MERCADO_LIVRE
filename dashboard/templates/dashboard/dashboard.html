@@ -1,0 +1,48 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block breadcrumb %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-heading heading-with-action">
+  <div><div class="eyebrow"><span class="eyebrow-line"></span>VISÃO GERAL</div><h1>Bom dia, operação <span class="wave">✦</span></h1><p>Acompanhe o estado do robô e os dados registrados no sistema.</p></div>
+  <a class="button button-secondary" href="{% url 'dashboard:history' %}"><svg class="icon"><use href="#i-clock"/></svg>Ver histórico</a>
+</div>
+<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-spark"/></svg></span><div><strong>Ambiente de demonstração</strong><p>Os controles atualizam o estado local. Busca, afiliados e WhatsApp não estão conectados a serviços externos.</p></div><span class="demo-pill">SEM INTEGRAÇÕES</span></div>
+<div class="metrics-grid">
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Ofertas encontradas</span><span class="metric-icon metric-purple"><svg class="icon"><use href="#i-search"/></svg></span></div><strong class="metric-value" id="metric-offers">{{ metrics.offers_found }}</strong><span class="metric-foot">Registros armazenados</span></article>
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Ofertas válidas</span><span class="metric-icon metric-green"><svg class="icon"><use href="#i-check"/></svg></span></div><strong class="metric-value" id="metric-valid">{{ metrics.valid_offers }}</strong><span class="metric-foot">Validadas no sistema</span></article>
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Links de afiliados</span><span class="metric-icon metric-orange"><svg class="icon"><use href="#i-link"/></svg></span></div><strong class="metric-value" id="metric-affiliates">{{ metrics.affiliate_links }}</strong><span class="metric-foot">Links registrados</span></article>
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Mensagens enviadas</span><span class="metric-icon metric-blue"><svg class="icon"><use href="#i-send"/></svg></span></div><strong class="metric-value" id="metric-messages">{{ metrics.messages_sent }}</strong><span class="metric-foot">Envios reais confirmados</span></article>
+  <article class="metric-card"><div class="metric-top"><span class="metric-label">Erros registrados</span><span class="metric-icon metric-red"><svg class="icon"><use href="#i-alert"/></svg></span></div><strong class="metric-value" id="metric-errors">{{ metrics.errors }}</strong><span class="metric-foot">Eventos classificados como erro</span></article>
+</div>
+<div class="dashboard-grid">
+  <section class="panel robot-panel">
+    <div class="panel-heading"><div><div class="eyebrow">CONTROLE</div><h2>Estado do robô</h2></div><span class="status-chip status-{{ robot_state.status }}" id="robot-status"><span class="status-dot"></span><span id="robot-status-label">{{ robot_state.get_status_display }}</span></span></div>
+    <div class="robot-summary"><div class="robot-orbit"><div class="orbit-ring"></div><div class="robot-symbol"><svg class="icon"><use href="#i-spark"/></svg></div></div><div class="robot-summary-copy"><strong id="robot-summary-title">{% if robot_state.status == 'running' %}Robô em execução{% elif robot_state.status == 'paused' %}Robô pausado{% else %}Robô parado{% endif %}</strong><span>Motor de demonstração · sem tarefas automáticas</span></div></div>
+    <div class="control-grid">
+      <button class="button button-primary" type="button" data-robot-action data-action-url="{% url 'robot_action' action='start' %}"><svg class="icon"><use href="#i-play"/></svg>INICIAR ROBÔ</button>
+      <button class="button button-secondary" type="button" data-robot-action data-action-url="{% url 'robot_action' action='pause' %}"><svg class="icon"><use href="#i-pause"/></svg>PAUSAR ROBÔ</button>
+      <button class="button button-danger" type="button" data-robot-action data-action-url="{% url 'robot_action' action='stop' %}"><svg class="icon"><use href="#i-stop"/></svg>PARAR ROBÔ</button>
+      <button class="button button-outline-green" type="button" data-robot-action data-action-url="{% url 'robot_action' action='search' %}"><svg class="icon"><use href="#i-refresh"/></svg>BUSCAR OFERTAS</button>
+    </div>
+    <p class="panel-footnote"><svg class="icon"><use href="#i-alert"/></svg>Buscar ofertas executa uma simulação e não consulta o Mercado Livre.</p>
+  </section>
+  <section class="panel schedule-panel">
+    <div class="panel-heading"><div><div class="eyebrow">AGENDAMENTO</div><h2>Execuções</h2></div><span class="panel-heading-icon"><svg class="icon"><use href="#i-clock"/></svg></span></div>
+    <div class="schedule-item"><span class="schedule-icon schedule-icon-green"><svg class="icon"><use href="#i-check"/></svg></span><div><span class="schedule-label">Última execução</span><strong id="last-execution">{% if robot_state.last_execution %}{{ robot_state.last_execution|date:"d/m/Y H:i" }}{% else %}Nenhuma execução{% endif %}</strong></div></div>
+    <div class="schedule-divider"></div>
+    <div class="schedule-item"><span class="schedule-icon schedule-icon-muted"><svg class="icon"><use href="#i-clock"/></svg></span><div><span class="schedule-label">Próxima execução</span><strong>Não agendada</strong></div></div>
+    <div class="schedule-note">O agendador automático ainda não está integrado. A busca pode ser executada manualmente.</div>
+    <a class="text-link" href="{% url 'dashboard:settings' %}">Configurar intervalo <svg class="icon"><use href="#i-arrow"/></svg></a>
+  </section>
+</div>
+<section class="panel recent-panel">
+  <div class="panel-heading"><div><div class="eyebrow">ACOMPANHAMENTO</div><h2>Ofertas recentes</h2></div><a class="text-link" href="{% url 'dashboard:offers' %}">Ver todas <svg class="icon"><use href="#i-arrow"/></svg></a></div>
+  {% if recent_offers %}
+    <div class="table-wrap"><table><thead><tr><th>PRODUTO</th><th>PREÇO PROMOCIONAL</th><th>DESCONTO</th><th>SITUAÇÃO</th></tr></thead><tbody>
+      {% for offer in recent_offers %}<tr><td class="product-cell"><span class="product-placeholder"><svg class="icon"><use href="#i-box"/></svg></span><span>{{ offer.product.name }}</span></td><td>R$ {{ offer.promotional_price|floatformat:2 }}</td><td>{{ offer.discount_percent }}%</td><td><span class="offer-status offer-status-{{ offer.status }}">{{ offer.get_status_display }}</span></td></tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}
+    <div class="empty-state compact-empty"><span class="empty-icon"><svg class="icon"><use href="#i-tag"/></svg></span><strong>Nenhuma oferta registrada</strong><p>Os dados aparecerão aqui quando ofertas reais forem cadastradas.</p><a class="button button-small button-secondary" href="{% url 'dashboard:offers' %}">Abrir ofertas</a></div>
+  {% endif %}
+</section>
+{% endblock %}

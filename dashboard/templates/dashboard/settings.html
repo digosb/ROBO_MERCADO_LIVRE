@@ -1,0 +1,10 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Configurações{% endblock %}
+{% block breadcrumb %}Configurações{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>PREFERÊNCIAS</div><h1>Configurações</h1><p>Ajuste os parâmetros do painel.</p></div></div>
+<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-alert"/></svg></span><div><strong>Intervalo salvo, agendador pendente</strong><p>O valor é persistido, mas não inicia envios automáticos enquanto o agendador e as integrações não estiverem conectados.</p></div></div>
+<section class="panel settings-panel"><div class="panel-heading"><div><div class="eyebrow">DISTRIBUIÇÃO</div><h2>Intervalo e limite diário</h2></div><span class="panel-heading-icon"><svg class="icon"><use href="#i-clock"/></svg></span></div>
+  <form method="post" class="settings-form">{% csrf_token %}<label for="send-interval">Tempo entre envios</label><div class="interval-control"><input id="send-interval" name="send_interval_minutes" type="number" min="1" max="1440" step="1" value="{{ settings.send_interval_minutes }}" required><span>minutos</span></div><span class="field-help">Escolha um valor entre 1 e 1440 minutos. O padrão inicial é 10 minutos.</span><label class="setting-secondary-label" for="max-sends">Quantidade máxima de envios por dia</label><div class="interval-control"><input id="max-sends" name="max_sends_per_day" type="number" min="1" max="10000" step="1" value="{{ settings.max_sends_per_day }}" required><span>envios/dia</span></div><span class="field-help">Limite diário entre 1 e 10000. Envios pendentes também reservam uma vaga.</span><div class="settings-divider"></div><div class="settings-info"><span class="info-icon"><svg class="icon"><use href="#i-alert"/></svg></span><p>Salvar estas preferências não agenda tarefas nem envia mensagens. O motor de execução ainda não está integrado.</p></div><button class="button button-primary" type="submit">Salvar configurações</button></form>
+</section>
+{% endblock %}

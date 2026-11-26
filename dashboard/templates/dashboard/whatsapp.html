@@ -1,0 +1,20 @@
+{% extends "dashboard/base.html" %}
+{% block title %}WhatsApp{% endblock %}
+{% block breadcrumb %}WhatsApp{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>CANAIS</div><h1>WhatsApp</h1><p>Consulte a conexão e prepare uma prévia de mensagem.</p></div></div>
+<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-alert"/></svg></span><div><strong>Envio de mensagens desativado</strong><p>Esta tela permite apenas preparar uma prévia local. Nenhuma mensagem será enviada pelo sistema.</p></div><span class="demo-pill">SEM CONEXÃO</span></div>
+<div class="whatsapp-grid">
+  <section class="panel connection-panel"><div class="panel-heading"><div><div class="eyebrow">INTEGRAÇÃO</div><h2>Status da conexão</h2></div><span class="status-chip status-disconnected"><span class="status-dot"></span>Não conectado</span></div>
+    <div class="connection-illustration"><div class="whatsapp-mark"><svg class="icon"><use href="#i-message"/></svg></div><div><strong>Canal não configurado</strong><p>Configure uma integração de WhatsApp antes de habilitar envios.</p></div></div>
+    <div class="detail-list"><div><span>Método de integração</span><strong>Preparação local (demonstração)</strong></div><div><span>Destino salvo</span><strong>{% if settings.whatsapp_destination %}{{ settings.whatsapp_destination }}{% else %}Não configurado{% endif %}</strong></div><div><span>Mensagens enviadas</span><strong>0 · nenhum envio real</strong></div></div>
+  </section>
+  <section class="panel destination-panel"><div class="panel-heading"><div><div class="eyebrow">CONFIGURAÇÃO</div><h2>Destino</h2></div></div>
+    <form method="post" class="stack-form">{% csrf_token %}<label for="destination">Número ou identificador do destino</label><input id="destination" name="destination" type="text" maxlength="80" value="{{ settings.whatsapp_destination }}" placeholder="+55 11 99999-9999"><span class="field-help">Armazenado como configuração. Salvar não conecta nem envia mensagens.</span><button class="button button-primary" type="submit">Salvar destino</button></form>
+  </section>
+</div>
+<section class="panel prepare-panel"><div class="panel-heading"><div><div class="eyebrow">PRÉ-VISUALIZAÇÃO</div><h2>Testar preparação de mensagem</h2></div><span class="preparation-label"><span></span>Somente local</span></div>
+  <form class="prepare-form" data-whatsapp-prepare data-prepare-url="{% url 'whatsapp_prepare' %}"><label for="offer-name">Nome da oferta (opcional)</label><div class="prepare-controls"><input id="offer-name" name="offer_name" type="text" maxlength="200" placeholder="Ex.: produto cadastrado"><button class="button button-outline-green" type="submit"><svg class="icon"><use href="#i-send"/></svg>Preparar prévia</button></div></form>
+  <div class="preview-box" id="message-preview" hidden><span class="preview-caption">PRÉVIA GERADA · NÃO ENVIADA</span><p></p></div>
+</section>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Histórico{% endblock %}
+{% block breadcrumb %}Histórico{% endblock %}
+{% block content %}
+<div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span>ATIVIDADE</div><h1>Histórico</h1><p>Ações e eventos registrados pelo painel.</p></div></div>
+<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-spark"/></svg></span><div><strong>Registro do ambiente local</strong><p>Eventos de simulação são identificados como tal. Envios e buscas externas não são realizados.</p></div></div>
+<section class="panel history-panel"><div class="panel-heading"><div><div class="eyebrow">EVENTOS RECENTES</div><h2>Registro de atividade</h2></div><span class="count-pill">Últimos 100</span></div>
+  {% if events %}<div class="activity-list">{% for event in events %}<article class="activity-item"><span class="activity-marker {% if event.severity == 'error' or event.severity == 'critical' %}activity-marker-error{% endif %}"><svg class="icon"><use href="{% if event.severity == 'error' or event.severity == 'critical' %}#i-alert{% else %}#i-check{% endif %}"/></svg></span><div class="activity-copy"><strong>{{ event.description }}</strong><span>{{ event.get_event_type_display }} · {{ event.get_severity_display }}</span></div><time datetime="{{ event.occurred_at|date:'c' }}">{{ event.occurred_at|date:"d/m/Y H:i:s" }}</time></article>{% endfor %}</div>
+  {% else %}<div class="empty-state"><span class="empty-icon"><svg class="icon"><use href="#i-clock"/></svg></span><strong>Nenhuma atividade registrada</strong><p>Quando você interagir com os controles, as ações aparecerão aqui.</p></div>{% endif %}
+</section>
+{% endblock %}
