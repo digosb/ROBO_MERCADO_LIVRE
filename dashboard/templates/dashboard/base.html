@@ -48,7 +48,7 @@
         <a class="nav-link {% if active_page == 'settings' %}is-active{% endif %}" href="{% url 'dashboard:settings' %}"><svg class="icon"><use href="#i-settings"/></svg><span>Configurações</span></a>
       </nav>
       <div class="sidebar-bottom">
-        <div class="demo-card"><span class="demo-icon"><svg class="icon"><use href="#i-spark"/></svg></span><strong>Modo demonstração</strong><p>Integrações externas ainda não configuradas.</p></div>
+        <div class="demo-card"><span class="demo-icon"><svg class="icon"><use href="#i-alert"/></svg></span><strong>Integrações bloqueadas</strong><p>Busca oficial e envio compatível ainda não disponíveis.</p></div>
         <div class="profile-row"><span class="profile-avatar">ML</span><span class="profile-copy"><strong>Operação local</strong><small>Ambiente de desenvolvimento</small></span><span class="profile-dot"></span></div>
       </div>
     </aside>
@@ -57,7 +57,7 @@
       <header class="topbar">
         <button class="icon-button mobile-menu" type="button" aria-label="Abrir menu" aria-expanded="false" aria-controls="sidebar" data-menu-toggle><svg class="icon"><use href="#i-menu"/></svg></button>
         <div class="breadcrumb"><span>Workspace</span><span class="breadcrumb-separator">/</span><strong>{% block breadcrumb %}Dashboard{% endblock %}</strong></div>
-        <div class="topbar-right"><span class="environment-badge"><span></span>DEMONSTRAÇÃO</span><span class="topbar-date" data-current-date></span><span class="top-avatar">ML</span></div>
+        <div class="topbar-right"><span class="environment-badge"><span></span>AMBIENTE LOCAL</span><span class="topbar-date" data-current-date></span><span class="top-avatar">ML</span></div>
       </header>
       <section class="page-content">
         {% if messages %}
@@ -69,7 +69,7 @@
         {% endif %}
         {% block content %}{% endblock %}
       </section>
-      <footer class="footer"><span>Oferta ML <span class="footer-separator">·</span> Painel em modo demonstração</span><span>Nenhuma integração externa está ativa</span></footer>
+      <footer class="footer"><span>Oferta ML <span class="footer-separator">·</span> Motor independente do navegador</span><span>Envio automático permanece desativado sem provedor autorizado</span></footer>
     </main>
   </div>
   <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>

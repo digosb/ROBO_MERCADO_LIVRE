@@ -203,10 +203,11 @@ class LinkAfiliado(models.Model):
 
 class Envio(models.Model):
     class Status(models.TextChoices):
-        PENDING = "pending", "Pendente"
-        SENT = "sent", "Enviado"
+        PENDING = "pending", "Aguardando"
+        PREPARED = "prepared", "Preparada"
+        SENT = "sent", "Enviada"
         FAILED = "failed", "Falhou"
-        CANCELLED = "cancelled", "Cancelado"
+        CANCELLED = "cancelled", "Cancelada"
 
     product = models.ForeignKey(
         Produto,
@@ -220,7 +221,7 @@ class Envio(models.Model):
         related_name="sendings",
         verbose_name="Oferta",
     )
-    message = models.TextField(max_length=2000, verbose_name="Mensagem")
+    message = models.TextField(max_length=4096, verbose_name="Mensagem")
     destination = models.CharField(max_length=120, verbose_name="Destino")
     status = models.CharField(
         max_length=10,
@@ -240,7 +241,7 @@ class Envio(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["offer"],
-                condition=Q(status__in=["pending", "sent"]),
+                condition=Q(status__in=["pending", "prepared", "sent"]),
                 name="unique_active_send_per_offer",
             )
         ]
@@ -256,10 +257,10 @@ class Envio(models.Model):
             return
         if self.offer.product_id != self.product_id:
             raise ValidationError({"product": "O produto deve ser o mesmo da oferta selecionada."})
-        if self.status not in (self.Status.PENDING, self.Status.SENT) or self.created_at is None:
+        active_statuses = (self.Status.PENDING, self.Status.PREPARED, self.Status.SENT)
+        if self.status not in active_statuses or self.created_at is None:
             return
 
-        active_statuses = (self.Status.PENDING, self.Status.SENT)
         active_send = Envio.objects.filter(offer_id=self.offer_id, status__in=active_statuses)
         created_at = self.created_at
         send_date = (
@@ -290,10 +291,52 @@ class Envio(models.Model):
         return super().save(*args, **kwargs)
 
 
+class MensagemWhatsApp(models.Model):
+    class Status(models.TextChoices):
+        PREPARED = "prepared", "Preparada"
+        SENT = "sent", "Enviada"
+        FAILED = "failed", "Falhou"
+
+    offer = models.ForeignKey(
+        Oferta,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="whatsapp_messages",
+        verbose_name="Oferta",
+    )
+    destination = models.CharField(max_length=80, blank=True, verbose_name="Destino")
+    message = models.TextField(blank=True, verbose_name="Mensagem")
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        verbose_name="Status",
+    )
+    is_test = models.BooleanField(default=False, verbose_name="Mensagem de teste")
+    dedupe_key = models.CharField(max_length=64, blank=True, verbose_name="Chave de deduplicação")
+    error_detail = models.CharField(max_length=500, blank=True, verbose_name="Detalhe do erro")
+    created_at = models.DateTimeField(default=timezone.now, verbose_name="Data e horário")
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["dedupe_key"],
+                condition=Q(status="prepared") & ~Q(dedupe_key=""),
+                name="unique_prepared_whatsapp_message",
+            )
+        ]
+        verbose_name = "Mensagem de WhatsApp"
+        verbose_name_plural = "Mensagens de WhatsApp"
+
+    def __str__(self):
+        return f"{self.get_status_display()} — {self.destination}"
+
+
 class Configuracao(models.Model):
     class Status(models.TextChoices):
         STOPPED = "stopped", "Parado"
-        RUNNING = "running", "Em execução (demonstração)"
+        RUNNING = "running", "Em execução"
         PAUSED = "paused", "Pausado"
 
     send_interval_minutes = models.PositiveIntegerField(
@@ -326,6 +369,26 @@ class Configuracao(models.Model):
         null=True,
         blank=True,
         verbose_name="Última execução",
+    )
+    next_execution = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Próxima execução",
+    )
+    worker_heartbeat = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Último sinal do motor",
+    )
+    control_changed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Última alteração de controle",
+    )
+    run_now_requested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Busca manual solicitada em",
     )
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import Configuracao, Envio, LinkAfiliado, LogSistema, Oferta, Produto
+from .models import (
+    Configuracao,
+    Envio,
+    LinkAfiliado,
+    LogSistema,
+    MensagemWhatsApp,
+    Oferta,
+    Produto,
+)
 
 
 @admin.register(Produto)
@@ -39,6 +47,14 @@ class EnvioAdmin(admin.ModelAdmin):
     list_filter = ("status", "created_at")
     search_fields = ("product__name", "offer__product__external_id", "destination", "external_id")
     readonly_fields = ("created_at",)
+
+
+@admin.register(MensagemWhatsApp)
+class MensagemWhatsAppAdmin(admin.ModelAdmin):
+    list_display = ("offer", "destination", "status", "is_test", "created_at")
+    list_filter = ("status", "is_test", "created_at")
+    search_fields = ("offer__product__name", "destination", "error_detail")
+    readonly_fields = ("created_at", "dedupe_key")
 
 
 @admin.register(Configuracao)

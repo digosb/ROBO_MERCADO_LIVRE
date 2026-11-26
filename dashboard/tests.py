@@ -1,15 +1,24 @@
 import json
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.core.cache import cache
+from django.core.management import call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
+from apscheduler.schedulers.background import BackgroundScheduler
 
+from .automation import (
+    CYCLE_JOB_ID,
+    MANUAL_JOB_ID,
+    AutomationRuntime,
+    is_worker_online,
+)
 from .mercadolivre import (
     OfferCandidate,
     OfferDiscoveryRateLimited,
@@ -23,8 +32,15 @@ from .models import (
     Envio,
     LinkAfiliado,
     LogSistema,
+    MensagemWhatsApp,
     Oferta,
     Produto,
+)
+from .whatsapp import (
+    WhatsAppDeliveryUnavailable,
+    WhatsAppPreparationError,
+    get_delivery_provider,
+    prepare_offer_message,
 )
 
 
@@ -49,12 +65,13 @@ def create_offer(product, **overrides):
 
 
 class DashboardPageTests(TestCase):
-    def test_dashboard_starts_with_empty_real_metrics_and_demo_label(self):
+    def test_dashboard_starts_with_empty_metrics_and_explicit_integration_state(self):
         response = self.client.get(reverse("dashboard:dashboard"))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "0")
-        self.assertContains(response, "demonstração")
+        self.assertContains(response, "Integrações externas indisponíveis")
+        self.assertContains(response, "Worker desconectado")
         self.assertEqual(response.context["metrics"]["offers_found"], 0)
         self.assertEqual(response.context["metrics"]["messages_sent"], 0)
 
@@ -72,9 +89,14 @@ class DashboardPageTests(TestCase):
 
 class RobotEndpointTests(TestCase):
     def test_robot_actions_change_persisted_status(self):
+        configuration = Configuracao.current()
+        configuration.worker_heartbeat = timezone.now()
+        configuration.save(update_fields=["worker_heartbeat", "updated_at"])
+
         for action, expected in (
             ("start", Configuracao.Status.RUNNING),
             ("pause", Configuracao.Status.PAUSED),
+            ("resume", Configuracao.Status.RUNNING),
             ("stop", Configuracao.Status.STOPPED),
         ):
             response = self.client.post(reverse("robot_action", args=[action]))
@@ -88,17 +110,32 @@ class RobotEndpointTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertFalse(response.json()["success"])
 
-    def test_search_reports_unavailable_source_without_creating_offers(self):
-        response = self.client.post(reverse("robot_action", args=["search"]))
+    def test_start_requires_a_live_worker(self):
+        response = self.client.post(reverse("robot_action", args=["start"]))
 
         self.assertEqual(response.status_code, 503)
         self.assertFalse(response.json()["success"])
+        self.assertEqual(Configuracao.current().status, Configuracao.Status.STOPPED)
+
+    def test_search_queues_a_real_worker_request(self):
+        configuration = Configuracao.current()
+        configuration.status = Configuracao.Status.RUNNING
+        configuration.worker_heartbeat = timezone.now()
+        configuration.save(update_fields=["status", "worker_heartbeat", "updated_at"])
+
+        response = self.client.post(reverse("robot_action", args=["search"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertIsNotNone(Configuracao.current().run_now_requested_at)
         self.assertIsNone(Configuracao.current().last_execution)
         self.assertEqual(Oferta.objects.count(), 0)
-        self.assertIn("campanhas LIGHTNING", response.json()["message"])
-        log = LogSistema.objects.get()
-        self.assertEqual(log.event_type, LogSistema.EventType.OFFER_SEARCH)
-        self.assertEqual(log.severity, LogSistema.Severity.WARNING)
+
+    def test_search_requires_running_robot_and_worker(self):
+        response = self.client.post(reverse("robot_action", args=["search"]))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()["success"])
 
     def test_unknown_action_is_not_found(self):
         response = self.client.post(reverse("robot_action", args=["reboot"]))
@@ -288,27 +325,39 @@ class ConfigurationTests(TestCase):
 
     def test_whatsapp_preview_requires_destination_and_does_not_send(self):
         url = reverse("whatsapp_prepare")
-        body = json.dumps({"offer_name": "Oferta de teste"})
+        product = create_product()
+        offer = create_offer(product)
+        LinkAfiliado.objects.create(
+            product=product,
+            original_url=product.product_url,
+            affiliate_url="https://example.com/afiliado",
+        )
+        body = json.dumps({"offer_id": offer.pk, "is_test": True})
 
         missing_destination = self.client.post(
             url, body, content_type="application/json"
         )
         self.assertEqual(missing_destination.status_code, 400)
+        self.assertEqual(
+            MensagemWhatsApp.objects.get().status,
+            MensagemWhatsApp.Status.FAILED,
+        )
 
         configuration = Configuracao.current()
-        configuration.whatsapp_destination = "+5511999999999"
+        configuration.whatsapp_destination = "Grupo público de ofertas"
         configuration.save()
         response = self.client.post(url, body, content_type="application/json")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Nenhuma mensagem foi enviada", response.json()["message"])
+        self.assertIn("nenhuma mensagem foi enviada", response.json()["message"])
         self.assertEqual(response.json()["destination"], configuration.whatsapp_destination)
         self.assertEqual(Envio.objects.count(), 0)
-        self.assertEqual(LogSistema.objects.count(), 1)
+        self.assertEqual(MensagemWhatsApp.objects.count(), 2)
+        self.assertEqual(LogSistema.objects.count(), 2)
 
     def test_whatsapp_preview_rejects_malformed_and_non_object_json(self):
         configuration = Configuracao.current()
-        configuration.whatsapp_destination = "+5511999999999"
+        configuration.whatsapp_destination = "Grupo de teste"
         configuration.save()
         url = reverse("whatsapp_prepare")
 
@@ -317,6 +366,92 @@ class ConfigurationTests(TestCase):
 
         self.assertEqual(malformed.status_code, 400)
         self.assertEqual(non_object.status_code, 400)
+
+    def test_whatsapp_message_uses_offer_and_affiliate_link_and_deduplicates(self):
+        product = create_product(name="Cafeteira")
+        offer = create_offer(
+            product,
+            original_price=Decimal("349.90"),
+            promotional_price=Decimal("279.92"),
+        )
+        LinkAfiliado.objects.create(
+            product=product,
+            original_url=product.product_url,
+            affiliate_url="https://example.com/afiliado-cafeteira",
+        )
+        values = {
+            "offer_id": offer.pk,
+            "destination": "Grupo público",
+            "is_test": True,
+        }
+
+        first = prepare_offer_message(**values)
+        second = prepare_offer_message(**values)
+
+        self.assertTrue(first.created)
+        self.assertFalse(second.created)
+        self.assertEqual(first.record.pk, second.record.pk)
+        self.assertIn("🔥 OFERTA RELÂMPAGO!", first.record.message)
+        self.assertIn("📦 Cafeteira", first.record.message)
+        self.assertIn("❌ De: R$ 349,90", first.record.message)
+        self.assertIn("✅ Por: R$ 279,92", first.record.message)
+        self.assertIn("🔥 Desconto: 20,00%", first.record.message)
+        self.assertIn("https://example.com/afiliado-cafeteira", first.record.message)
+        self.assertEqual(MensagemWhatsApp.objects.count(), 1)
+        self.assertEqual(Envio.objects.count(), 0)
+
+    def test_whatsapp_preparation_records_failure_without_affiliate_link(self):
+        offer = create_offer(create_product())
+
+        with self.assertRaises(WhatsAppPreparationError):
+            prepare_offer_message(offer.pk, "Grupo público")
+
+        failure = MensagemWhatsApp.objects.get()
+        self.assertEqual(failure.status, MensagemWhatsApp.Status.FAILED)
+        self.assertIn("link de afiliado", failure.error_detail)
+        self.assertEqual(Envio.objects.count(), 0)
+
+    def test_whatsapp_destination_rejects_invitation_urls(self):
+        response = self.client.post(
+            reverse("dashboard:whatsapp"),
+            {"destination": "https://chat.whatsapp.com/example"},
+            follow=True,
+        )
+
+        self.assertContains(response, "rótulo para o grupo. Links de convite")
+        self.assertEqual(Configuracao.current().whatsapp_destination, "")
+
+    def test_official_delivery_provider_fails_closed_for_personal_existing_group(self):
+        provider = get_delivery_provider()
+
+        with self.assertRaises(WhatsAppDeliveryUnavailable):
+            provider.send("Grupo público", "Mensagem")
+
+        self.assertEqual(Envio.objects.count(), 0)
+
+    def test_worker_heartbeat_expires(self):
+        configuration = Configuracao.current()
+        configuration.worker_heartbeat = timezone.now() - timedelta(seconds=30)
+        configuration.save(update_fields=["worker_heartbeat", "updated_at"])
+
+        self.assertFalse(is_worker_online(configuration))
+
+    def test_whatsapp_page_displays_connection_limitation_and_history(self):
+        product = create_product()
+        offer = create_offer(product)
+        LinkAfiliado.objects.create(
+            product=product,
+            original_url=product.product_url,
+            affiliate_url="https://example.com/afiliado",
+        )
+        prepare_offer_message(offer.pk, "Grupo público")
+
+        response = self.client.get(reverse("dashboard:whatsapp"))
+
+        self.assertContains(response, "grupos existentes do WhatsApp pessoal")
+        self.assertContains(response, "Preparada")
+        self.assertContains(response, "Grupo público")
+        self.assertContains(response, "Envios reais")
 
     def test_dashboard_metrics_use_persisted_business_records(self):
         product = create_product()
@@ -488,6 +623,39 @@ class BusinessModelTests(TestCase):
                 destination="+5511999999999",
             )
 
+    def test_prepared_send_reserves_offer_and_daily_capacity(self):
+        configuration = Configuracao.current()
+        configuration.max_sends_per_day = 1
+        configuration.save()
+        product = create_product()
+        offer = create_offer(product)
+        Envio.objects.create(
+            product=product,
+            offer=offer,
+            message="Preparada, ainda não enviada",
+            destination="Grupo",
+            status=Envio.Status.PREPARED,
+        )
+
+        with self.assertRaises(ValidationError):
+            Envio.objects.create(
+                product=product,
+                offer=offer,
+                message="Duplicada",
+                destination="Grupo",
+                status=Envio.Status.PENDING,
+            )
+
+        second_product = create_product(2, product_url="https://example.com/produto-2")
+        with self.assertRaises(ValidationError):
+            Envio.objects.create(
+                product=second_product,
+                offer=create_offer(second_product),
+                message="Além do limite",
+                destination="Grupo",
+                status=Envio.Status.PREPARED,
+            )
+
     def test_sending_product_must_match_offer(self):
         product = create_product()
         other_product = create_product(2)
@@ -567,6 +735,361 @@ class MercadoLivreDiscoveryTests(TestCase):
             discover_flash_deals(provider)
 
         self.assertEqual(provider.calls, 1)
+
+
+class AutomationCycleTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.now = timezone.now()
+        self.candidate = OfferCandidate(
+            external_id="TEST-AUTOMATION-1",
+            title="Produto automatizado",
+            image_url="https://example.com/automation-image.jpg",
+            original_url="https://example.com/automation-product",
+            category="Teste",
+            original_price=Decimal("100.00"),
+            promotional_price=Decimal("75.00"),
+            starts_at=self.now - timedelta(minutes=1),
+            ends_at=self.now + timedelta(hours=1),
+            is_available=True,
+        )
+        self.configuration = Configuracao.current()
+        self.configuration.status = Configuracao.Status.RUNNING
+        self.configuration.whatsapp_destination = "Grupo de ofertas"
+        self.configuration.save(update_fields=["status", "whatsapp_destination", "updated_at"])
+
+    def make_provider(self, candidates=None, on_discover=None):
+        class TestProvider:
+            cache_namespace = "automation-cycle-tests"
+            is_available = True
+
+            def discover(inner_self):
+                if on_discover:
+                    on_discover()
+                return candidates if candidates is not None else [self.candidate]
+
+        return TestProvider()
+
+    def add_verified_link(self):
+        product = create_product(
+            name=self.candidate.title,
+            external_id=self.candidate.external_id,
+            product_url=self.candidate.original_url,
+        )
+        LinkAfiliado.objects.create(
+            product=product,
+            original_url=product.product_url,
+            affiliate_url="https://example.com/validated-affiliate",
+            validation_status=LinkAfiliado.ValidationStatus.VALID,
+        )
+        return product
+
+    def test_cycle_prepares_once_without_claiming_delivery(self):
+        self.add_verified_link()
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider(),
+        )
+
+        runtime.run_cycle()
+        runtime.run_cycle()
+
+        envio = Envio.objects.get()
+        self.assertEqual(envio.status, Envio.Status.PREPARED)
+        self.assertEqual(MensagemWhatsApp.objects.get().status, MensagemWhatsApp.Status.PREPARED)
+        self.assertEqual(Envio.objects.filter(status=Envio.Status.SENT).count(), 0)
+        self.assertEqual(Envio.objects.filter(product=envio.product).count(), 1)
+
+    def test_cycle_selects_at_most_one_offer(self):
+        first_product = self.add_verified_link()
+        second_candidate = OfferCandidate(
+            external_id="TEST-AUTOMATION-2",
+            title="Segundo produto",
+            image_url="https://example.com/automation-image-2.jpg",
+            original_url="https://example.com/automation-product-2",
+            category="Teste",
+            original_price=Decimal("200.00"),
+            promotional_price=Decimal("100.00"),
+            starts_at=self.now - timedelta(minutes=2),
+            ends_at=self.now + timedelta(hours=1),
+            is_available=True,
+        )
+        second_product = create_product(
+            name=second_candidate.title,
+            external_id=second_candidate.external_id,
+            product_url=second_candidate.original_url,
+        )
+        for product in (first_product, second_product):
+            LinkAfiliado.objects.create(
+                product=product,
+                original_url=product.product_url,
+                affiliate_url=f"https://example.com/affiliate-{product.pk}",
+                validation_status=LinkAfiliado.ValidationStatus.VALID,
+            )
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider([self.candidate, second_candidate]),
+        )
+
+        runtime.run_cycle()
+
+        self.assertEqual(Envio.objects.count(), 1)
+        self.assertEqual(Envio.objects.get().product, second_product)
+
+    def test_cycle_requires_validated_affiliate_link(self):
+        product = create_product(
+            name=self.candidate.title,
+            external_id=self.candidate.external_id,
+            product_url=self.candidate.original_url,
+        )
+        LinkAfiliado.objects.create(
+            product=product,
+            original_url=product.product_url,
+            affiliate_url="https://example.com/pending-affiliate",
+            validation_status=LinkAfiliado.ValidationStatus.PENDING,
+        )
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider(),
+        )
+
+        runtime.run_cycle()
+
+        self.assertEqual(Envio.objects.count(), 0)
+        self.assertEqual(MensagemWhatsApp.objects.count(), 0)
+
+    def test_cycle_does_not_repeat_a_product_sent_through_another_offer(self):
+        product = self.add_verified_link()
+        previous_offer = create_offer(
+            product,
+            start_date=self.now - timedelta(days=2),
+            end_date=self.now - timedelta(days=1),
+            status=Oferta.Status.UNAVAILABLE,
+        )
+        Envio.objects.create(
+            product=product,
+            offer=previous_offer,
+            message="Envio anterior",
+            destination="Grupo de ofertas",
+            status=Envio.Status.SENT,
+        )
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider(),
+        )
+
+        runtime.run_cycle()
+
+        self.assertEqual(Oferta.objects.filter(product=product).count(), 2)
+        self.assertEqual(Envio.objects.filter(product=product).count(), 1)
+
+    def test_cycle_skips_expired_offer(self):
+        expired_candidate = OfferCandidate(
+            **{
+                **self.candidate.__dict__,
+                "ends_at": self.now - timedelta(seconds=1),
+            }
+        )
+        self.add_verified_link()
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider([expired_candidate]),
+        )
+
+        runtime.run_cycle()
+
+        self.assertEqual(Envio.objects.count(), 0)
+        self.assertEqual(Oferta.objects.get().status, Oferta.Status.UNAVAILABLE)
+
+    def test_cycle_stops_when_paused_during_discovery(self):
+        def pause_robot():
+            configuration = Configuracao.current()
+            configuration.status = Configuracao.Status.PAUSED
+            configuration.save(update_fields=["status", "updated_at"])
+
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider(on_discover=pause_robot),
+        )
+
+        runtime.run_cycle()
+
+        self.assertEqual(Oferta.objects.count(), 0)
+        self.assertEqual(Envio.objects.count(), 0)
+        self.assertTrue(
+            LogSistema.objects.filter(description__contains="Ciclo interrompido").exists()
+        )
+
+    def test_cycle_records_unavailable_discovery_provider(self):
+        runtime = AutomationRuntime(scheduler=None)
+
+        runtime.run_cycle()
+
+        self.assertIsNotNone(Configuracao.current().last_execution)
+        self.assertEqual(Oferta.objects.count(), 0)
+        self.assertTrue(
+            LogSistema.objects.filter(
+                event_type=LogSistema.EventType.OFFER_SEARCH,
+                severity=LogSistema.Severity.ERROR,
+                description__contains="campanhas LIGHTNING",
+            ).exists()
+        )
+
+    def test_authorized_connected_provider_is_required_for_sending(self):
+        self.add_verified_link()
+
+        class AuthorizedProvider:
+            is_authorized = True
+            is_connected = True
+            sent_messages = []
+
+            def supports_destination(self, destination):
+                return destination == "Grupo de ofertas"
+
+            def send(self, destination, message):
+                self.sent_messages.append((destination, message))
+                return "provider-message-123"
+
+        provider = AuthorizedProvider()
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider(),
+            delivery_provider=provider,
+        )
+
+        runtime.run_cycle()
+
+        envio = Envio.objects.get()
+        self.assertEqual(envio.status, Envio.Status.SENT)
+        self.assertEqual(envio.external_id, "provider-message-123")
+        self.assertEqual(MensagemWhatsApp.objects.get().status, MensagemWhatsApp.Status.SENT)
+        self.assertEqual(len(provider.sent_messages), 1)
+
+    def test_delivery_provider_failure_is_recorded_and_not_marked_sent(self):
+        self.add_verified_link()
+
+        class FailingProvider:
+            is_authorized = True
+            is_connected = True
+
+            def supports_destination(self, destination):
+                return True
+
+            def send(self, destination, message):
+                raise WhatsAppDeliveryUnavailable("Falha controlada pelo teste.")
+
+        runtime = AutomationRuntime(
+            scheduler=None,
+            discovery_provider=self.make_provider(),
+            delivery_provider=FailingProvider(),
+        )
+
+        runtime.run_cycle()
+        runtime.run_cycle()
+
+        self.assertEqual(Envio.objects.get().status, Envio.Status.FAILED)
+        self.assertEqual(MensagemWhatsApp.objects.get().status, MensagemWhatsApp.Status.FAILED)
+        self.assertEqual(Envio.objects.filter(status=Envio.Status.SENT).count(), 0)
+        self.assertTrue(
+            LogSistema.objects.filter(
+                severity=LogSistema.Severity.ERROR,
+                description__contains="Falha controlada",
+            ).exists()
+        )
+
+
+class AutomationSchedulerTests(TestCase):
+    def test_pause_resume_and_stop_update_real_scheduler_jobs(self):
+        scheduler = BackgroundScheduler()
+        scheduler.start(paused=True)
+        runtime = AutomationRuntime(scheduler=scheduler)
+        configuration = Configuracao.current()
+        try:
+            configuration.status = Configuracao.Status.RUNNING
+            configuration.run_now_requested_at = timezone.now()
+            configuration.save(
+                update_fields=["status", "run_now_requested_at", "updated_at"]
+            )
+            runtime.sync_control()
+
+            first_job = scheduler.get_job(CYCLE_JOB_ID)
+            self.assertIsNotNone(first_job)
+            self.assertEqual(first_job.trigger.interval, timedelta(minutes=10))
+            self.assertIsNotNone(Configuracao.current().next_execution)
+            self.assertIsNotNone(scheduler.get_job(MANUAL_JOB_ID))
+            self.assertIsNone(Configuracao.current().run_now_requested_at)
+
+            configuration = Configuracao.current()
+            configuration.status = Configuracao.Status.PAUSED
+            configuration.save(update_fields=["status", "updated_at"])
+            runtime.sync_control()
+            self.assertIsNone(scheduler.get_job(CYCLE_JOB_ID))
+            self.assertIsNone(scheduler.get_job(MANUAL_JOB_ID))
+            self.assertIsNone(Configuracao.current().next_execution)
+
+            configuration = Configuracao.current()
+            configuration.status = Configuracao.Status.RUNNING
+            configuration.save(update_fields=["status", "updated_at"])
+            runtime.sync_control()
+            resumed_job = scheduler.get_job(CYCLE_JOB_ID)
+            self.assertIsNotNone(resumed_job)
+            self.assertGreater(resumed_job.next_run_time, timezone.now())
+
+            configuration = Configuracao.current()
+            configuration.status = Configuracao.Status.STOPPED
+            configuration.save(update_fields=["status", "updated_at"])
+            runtime.sync_control()
+            self.assertIsNone(scheduler.get_job(CYCLE_JOB_ID))
+        finally:
+            scheduler.shutdown(wait=False)
+
+    def test_worker_command_clears_heartbeat_on_graceful_shutdown(self):
+        with (
+            patch(
+                "dashboard.management.commands.run_automation.AutomationProcessLock"
+            ) as lock_class,
+            patch(
+                "dashboard.management.commands.run_automation.BlockingScheduler"
+            ) as scheduler_class,
+        ):
+            lock = lock_class.return_value
+            lock.acquire.return_value = True
+            scheduler = scheduler_class.return_value
+            scheduler.running = False
+            scheduler.start.side_effect = KeyboardInterrupt
+
+            call_command("run_automation")
+
+        self.assertIsNone(Configuracao.current().worker_heartbeat)
+        lock.release.assert_called_once()
+
+    def test_quick_pause_resume_discards_stale_cycle_generation(self):
+        scheduler = BackgroundScheduler()
+        scheduler.start(paused=True)
+        runtime = AutomationRuntime(scheduler=scheduler)
+        configuration = Configuracao.current()
+        old_control_time = timezone.now()
+        try:
+            configuration.status = Configuracao.Status.RUNNING
+            configuration.control_changed_at = old_control_time
+            configuration.save(update_fields=["status", "control_changed_at", "updated_at"])
+            runtime.sync_control()
+
+            configuration.status = Configuracao.Status.PAUSED
+            configuration.control_changed_at = old_control_time + timedelta(microseconds=1)
+            configuration.save(update_fields=["status", "control_changed_at", "updated_at"])
+            configuration.status = Configuracao.Status.RUNNING
+            configuration.control_changed_at = old_control_time + timedelta(microseconds=2)
+            configuration.save(update_fields=["status", "control_changed_at", "updated_at"])
+            runtime.sync_control()
+
+            job = scheduler.get_job(CYCLE_JOB_ID)
+            self.assertIsNotNone(job)
+            self.assertEqual(job.args[0], configuration.control_changed_at)
+            runtime.run_cycle(old_control_time)
+            self.assertIsNone(Configuracao.current().last_execution)
+        finally:
+            scheduler.shutdown(wait=False)
 
 
 class BusinessMigrationTests(TransactionTestCase):

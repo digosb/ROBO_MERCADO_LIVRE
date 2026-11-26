@@ -52,6 +52,7 @@
     const status = document.getElementById('robot-status');
     const statusLabel = document.getElementById('robot-status-label');
     const summaryTitle = document.getElementById('robot-summary-title');
+    const workerConnectivity = document.getElementById('worker-connectivity');
     if (status && statusLabel) {
       status.className = `status-chip status-${data.status}`;
       statusLabel.textContent = data.status_label;
@@ -63,11 +64,22 @@
         stopped: 'Robô parado',
       }[data.status] || 'Estado desconhecido';
     }
+    if (workerConnectivity) {
+      workerConnectivity.textContent = data.worker_online
+        ? 'Worker conectado · envio automático bloqueado'
+        : 'Worker desconectado';
+    }
     const lastExecution = document.getElementById('last-execution');
     if (lastExecution) {
       lastExecution.textContent = data.last_execution
         ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(data.last_execution))
         : 'Nenhuma execução';
+    }
+    const nextExecution = document.getElementById('next-execution');
+    if (nextExecution) {
+      nextExecution.textContent = data.next_execution
+        ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(data.next_execution))
+        : 'Não agendada';
     }
   }
 
@@ -86,6 +98,20 @@
     });
   });
 
+  if (document.getElementById('robot-status')) {
+    let statusPollFailureShown = false;
+    window.setInterval(() => {
+      refreshDashboard()
+        .then(() => { statusPollFailureShown = false; })
+        .catch((error) => {
+          if (!statusPollFailureShown) {
+            showToast(error.message || 'Não foi possível atualizar o estado do motor.', true);
+            statusPollFailureShown = true;
+          }
+        });
+    }, 10000);
+  }
+
   document.querySelector('[data-whatsapp-prepare]')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -95,16 +121,56 @@
       const result = await sendRequest(form.dataset.prepareUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ offer_name: form.elements.offer_name.value }),
+        body: JSON.stringify({
+          offer_id: form.elements.offer_id.value,
+          is_test: form.elements.is_test.checked,
+        }),
       });
       const preview = document.getElementById('message-preview');
-      preview.querySelector('p').textContent = result.preview;
+      preview.querySelector('pre').textContent = result.preview;
       preview.hidden = false;
+      const empty = document.getElementById('whatsapp-empty');
+      if (empty) empty.remove();
+      const history = document.getElementById('whatsapp-history');
+      if (history && result.created) {
+        const row = document.createElement('tr');
+        [
+          result.offer_name,
+          result.destination,
+          result.created_at,
+          form.elements.is_test.checked ? 'Teste' : 'Preparação',
+          result.status,
+        ].forEach((value) => {
+          const cell = document.createElement('td');
+          cell.textContent = value;
+          row.append(cell);
+        });
+        const detail = document.createElement('td');
+        detail.textContent = 'Mensagem preparada localmente; não enviada.';
+        row.append(detail);
+        history.prepend(row);
+        const count = document.getElementById('whatsapp-history-count');
+        if (count) {
+          const nextCount = Number(count.dataset.count) + 1;
+          count.dataset.count = String(nextCount);
+          count.textContent = `${nextCount} registro${nextCount === 1 ? '' : 's'}`;
+        }
+      }
       showToast(result.message);
     } catch (error) {
       showToast(error.message || 'Não foi possível preparar a prévia.', true);
     } finally {
       button.disabled = false;
+    }
+  });
+
+  document.querySelector('[data-copy-preview]')?.addEventListener('click', async () => {
+    const message = document.querySelector('#message-preview pre')?.textContent || '';
+    try {
+      await navigator.clipboard.writeText(message);
+      showToast('Mensagem copiada. Cole e envie manualmente no grupo.');
+    } catch {
+      showToast('Não foi possível copiar automaticamente. Selecione e copie a mensagem.', true);
     }
   });
 

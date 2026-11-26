@@ -6,7 +6,7 @@
   <div><div class="eyebrow"><span class="eyebrow-line"></span>VISÃO GERAL</div><h1>Bom dia, operação <span class="wave">✦</span></h1><p>Acompanhe o estado do robô e os dados registrados no sistema.</p></div>
   <a class="button button-secondary" href="{% url 'dashboard:history' %}"><svg class="icon"><use href="#i-clock"/></svg>Ver histórico</a>
 </div>
-<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-spark"/></svg></span><div><strong>Ambiente de demonstração</strong><p>Os controles atualizam o estado local. Busca, afiliados e WhatsApp não estão conectados a serviços externos.</p></div><span class="demo-pill">SEM INTEGRAÇÕES</span></div>
+<div class="demo-notice"><span class="notice-mark"><svg class="icon"><use href="#i-alert"/></svg></span><div><strong>Integrações externas indisponíveis</strong><p>O agendador é real e independente do navegador. A busca padrão do Mercado Livre e o envio para o grupo existente seguem bloqueados por falta de provedores oficiais compatíveis.</p></div><span class="demo-pill">SEM ENVIO AUTOMÁTICO</span></div>
 <div class="metrics-grid">
   <article class="metric-card"><div class="metric-top"><span class="metric-label">Ofertas encontradas</span><span class="metric-icon metric-purple"><svg class="icon"><use href="#i-search"/></svg></span></div><strong class="metric-value" id="metric-offers">{{ metrics.offers_found }}</strong><span class="metric-foot">Registros armazenados</span></article>
   <article class="metric-card"><div class="metric-top"><span class="metric-label">Ofertas válidas</span><span class="metric-icon metric-green"><svg class="icon"><use href="#i-check"/></svg></span></div><strong class="metric-value" id="metric-valid">{{ metrics.valid_offers }}</strong><span class="metric-foot">Validadas no sistema</span></article>
@@ -17,21 +17,22 @@
 <div class="dashboard-grid">
   <section class="panel robot-panel">
     <div class="panel-heading"><div><div class="eyebrow">CONTROLE</div><h2>Estado do robô</h2></div><span class="status-chip status-{{ robot_state.status }}" id="robot-status"><span class="status-dot"></span><span id="robot-status-label">{{ robot_state.get_status_display }}</span></span></div>
-    <div class="robot-summary"><div class="robot-orbit"><div class="orbit-ring"></div><div class="robot-symbol"><svg class="icon"><use href="#i-spark"/></svg></div></div><div class="robot-summary-copy"><strong id="robot-summary-title">{% if robot_state.status == 'running' %}Robô em execução{% elif robot_state.status == 'paused' %}Robô pausado{% else %}Robô parado{% endif %}</strong><span>Motor de demonstração · sem tarefas automáticas</span></div></div>
+    <div class="robot-summary"><div class="robot-orbit"><div class="orbit-ring"></div><div class="robot-symbol"><svg class="icon"><use href="#i-spark"/></svg></div></div><div class="robot-summary-copy"><strong id="robot-summary-title">{% if robot_state.status == 'running' %}Robô em execução{% elif robot_state.status == 'paused' %}Robô pausado{% else %}Robô parado{% endif %}</strong><span id="worker-connectivity">{% if worker_online %}Worker conectado · envio automático bloqueado{% else %}Worker desconectado{% endif %}</span></div></div>
     <div class="control-grid">
       <button class="button button-primary" type="button" data-robot-action data-action-url="{% url 'robot_action' action='start' %}"><svg class="icon"><use href="#i-play"/></svg>INICIAR ROBÔ</button>
       <button class="button button-secondary" type="button" data-robot-action data-action-url="{% url 'robot_action' action='pause' %}"><svg class="icon"><use href="#i-pause"/></svg>PAUSAR ROBÔ</button>
+      <button class="button button-secondary" type="button" data-robot-action data-action-url="{% url 'robot_action' action='resume' %}"><svg class="icon"><use href="#i-play"/></svg>RETOMAR ROBÔ</button>
       <button class="button button-danger" type="button" data-robot-action data-action-url="{% url 'robot_action' action='stop' %}"><svg class="icon"><use href="#i-stop"/></svg>PARAR ROBÔ</button>
       <button class="button button-outline-green" type="button" data-robot-action data-action-url="{% url 'robot_action' action='search' %}"><svg class="icon"><use href="#i-refresh"/></svg>BUSCAR OFERTAS</button>
     </div>
-    <p class="panel-footnote"><svg class="icon"><use href="#i-alert"/></svg>Buscar ofertas executa uma simulação e não consulta o Mercado Livre.</p>
+    <p class="panel-footnote"><svg class="icon"><use href="#i-alert"/></svg>A busca é enfileirada no worker; sem um provedor oficial, ela falhará explicitamente e não criará ofertas simuladas.</p>
   </section>
   <section class="panel schedule-panel">
     <div class="panel-heading"><div><div class="eyebrow">AGENDAMENTO</div><h2>Execuções</h2></div><span class="panel-heading-icon"><svg class="icon"><use href="#i-clock"/></svg></span></div>
     <div class="schedule-item"><span class="schedule-icon schedule-icon-green"><svg class="icon"><use href="#i-check"/></svg></span><div><span class="schedule-label">Última execução</span><strong id="last-execution">{% if robot_state.last_execution %}{{ robot_state.last_execution|date:"d/m/Y H:i" }}{% else %}Nenhuma execução{% endif %}</strong></div></div>
     <div class="schedule-divider"></div>
-    <div class="schedule-item"><span class="schedule-icon schedule-icon-muted"><svg class="icon"><use href="#i-clock"/></svg></span><div><span class="schedule-label">Próxima execução</span><strong>Não agendada</strong></div></div>
-    <div class="schedule-note">O agendador automático ainda não está integrado. A busca pode ser executada manualmente.</div>
+    <div class="schedule-item"><span class="schedule-icon schedule-icon-muted"><svg class="icon"><use href="#i-clock"/></svg></span><div><span class="schedule-label">Próxima execução</span><strong id="next-execution">{% if robot_state.next_execution %}{{ robot_state.next_execution|date:"d/m/Y H:i" }}{% else %}Não agendada{% endif %}</strong></div></div>
+    <div class="schedule-note">O worker APScheduler deve permanecer ativo. Ciclos atrasados não são acumulados; retomar inicia um novo intervalo.</div>
     <a class="text-link" href="{% url 'dashboard:settings' %}">Configurar intervalo <svg class="icon"><use href="#i-arrow"/></svg></a>
   </section>
 </div>

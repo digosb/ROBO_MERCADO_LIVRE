@@ -7,14 +7,14 @@ consultada confirma recursos de gerenciamento das campanhas `LIGHTNING` de itens
 de vendedores convidados, mas não confirma um feed ou endpoint autorizado para
 descobrir ofertas relâmpago gerais do marketplace.
 
-Por isso, a ação **Buscar ofertas** responde com HTTP 503 e explica a limitação.
-Ela não consulta uma rota presumida, não cria ofertas e não marca a busca como
-executada. O provedor padrão está em
+Por isso, a ação **Buscar ofertas** exige o worker ativo e apenas enfileira um
+ciclo nele. O provedor padrão registra a indisponibilidade, não consulta uma
+rota presumida e não cria ofertas. O adaptador está em
 [`dashboard/mercadolivre.py`](../dashboard/mercadolivre.py). Um futuro adaptador
 deve implementar o contrato `OfferProvider` e somente retornar dados que tenham
 origem oficial e autorização verificadas.
 Adaptadores devem converter falhas de comunicação ou respostas inválidas em
-`OfferProviderError` para que a API as registre e retorne um erro explícito.
+`OfferProviderError` para que o worker as registre no histórico do sistema.
 
 O formato interno `OfferCandidate` é um contrato do projeto, não uma descrição
 do payload de qualquer endpoint do Mercado Livre.

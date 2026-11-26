@@ -164,6 +164,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .offer-status-valid { background: #243523; color: #a7db87; }
 .offer-status-invalid { background: #392729; color: #e59b9b; }
 .offer-status-pending { background: #332f23; color: #dbc17f; }
+.offer-status-prepared { background: #243523; color: #a7db87; }
+.offer-status-failed { background: #392729; color: #e59b9b; }
 .offer-status-available { background: #243523; color: #a7db87; }
 .offer-status-unavailable { background: #392729; color: #e59b9b; }
 .offer-status-unknown { background: #332f23; color: #dbc17f; }
@@ -204,7 +206,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .detail-list strong { color: #d8e0d9; font-size: 11px; text-align: right; }
 .stack-form { display: flex; flex-direction: column; gap: 9px; margin-top: 21px; }
 .stack-form label, .settings-form label, .prepare-form label { color: #bdc7be; font-size: 11px; font-weight: 600; }
-input[type="text"], input[type="number"], input[type="url"], input[type="date"] { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid #39433c; border-radius: 7px; outline: 0; background: #131915; color: var(--text); font-size: 12px; transition: border-color .15s ease, box-shadow .15s ease; }
+input[type="text"], input[type="number"], input[type="url"], input[type="date"], select { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid #39433c; border-radius: 7px; outline: 0; background: #131915; color: var(--text); font-size: 12px; transition: border-color .15s ease, box-shadow .15s ease; }
 input::placeholder { color: #68756c; }
 input:focus { border-color: #75b94b; box-shadow: 0 0 0 3px #84d94b1c; }
 .field-help { color: #7f8a82; font-size: 10px; line-height: 1.5; }
@@ -213,10 +215,14 @@ input:focus { border-color: #75b94b; box-shadow: 0 0 0 3px #84d94b1c; }
 .preparation-label span { background: #b5a16b; box-shadow: none; }
 .prepare-form { margin-top: 19px; }
 .prepare-controls { display: flex; gap: 9px; margin-top: 8px; }
-.prepare-controls input { flex: 1; min-width: 100px; }
+.prepare-controls input, .prepare-controls select { flex: 1; min-width: 100px; }
 .preview-box { margin-top: 15px; padding: 13px; border: 1px solid #374633; border-radius: 7px; background: #1d271d; }
 .preview-caption { color: #9db58e; font-size: 9px; font-weight: 700; letter-spacing: .9px; }
-.preview-box p { margin: 7px 0 0; color: #d4dfd1; font-size: 12px; }
+.preview-box pre, .table-wrap td pre { overflow-wrap: anywhere; white-space: pre-wrap; margin: 9px 0 12px; color: #d4dfd1; font: inherit; font-size: 12px; line-height: 1.65; }
+.test-mode-label { display: flex; align-items: center; gap: 7px; margin-top: 12px; color: #bdc7be; font-size: 11px; }
+.test-mode-label input { accent-color: var(--green); }
+.table-wrap details { min-width: 100px; }
+.table-wrap summary { cursor: pointer; color: var(--green); }
 .activity-list { margin-top: 12px; }
 .activity-item { display: flex; align-items: center; gap: 12px; min-height: 62px; border-top: 1px solid var(--line-soft); }
 .activity-marker { width: 29px; height: 29px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 8px; background: #263628; color: #a5dc83; }
